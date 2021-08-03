@@ -24,8 +24,6 @@ void on_new_connection(struct uv_stream_s* handle, int status) {
         // Fix me
         // uv_read_start((uv_stream_t*)client, NULL, NULL);
     }
-
-
 }
 
 int main() {
