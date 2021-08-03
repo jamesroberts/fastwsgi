@@ -1,3 +1,3 @@
 server: server.c
-	mkdir bin
+	mkdir -p bin
 	gcc -o bin/server server.c -luv
