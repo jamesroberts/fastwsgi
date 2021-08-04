@@ -1,3 +1,3 @@
 server: server.c
 	mkdir -p bin
-	gcc -o bin/server server.c -luv
+	gcc -Illhttp/include llhttp/src/*.c server.c -o bin/server -luv

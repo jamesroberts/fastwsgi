@@ -2,11 +2,14 @@
 #include <stdlib.h>
 #include <assert.h>
 #include "uv.h"
+#include "llhttp.h"
 
 #define DEFAULT_PORT 5000
 #define DEFAULT_BACKLOG 128
 
 static uv_tcp_t server;
+static llhttp_settings_t settings;
+static uv_buf_t response_buf;
 struct sockaddr_in addr;
 
 typedef struct {
@@ -14,51 +17,104 @@ typedef struct {
     uv_buf_t buf;
 } write_req_t;
 
+
+typedef struct {
+    uv_tcp_t client;
+    llhttp_t parser;
+    write_req_t write_req;
+} client_t;
+
 void on_close(uv_handle_t* handle) {
     printf("disconnected\n");
     free(handle);
 }
 
-void free_write_req(uv_write_t* req) {
-    write_req_t* wr = (write_req_t*)req;
-    free(wr->buf.base);
-    free(wr);
-}
+// void free_write_req(uv_write_t* req) {
+//     write_req_t* wr = (write_req_t*)req;
+//     free(wr->buf.base);
+//     free(wr);
+// }
 
 void echo_write(uv_write_t* req, int status) {
     if (status) {
         fprintf(stderr, "Write error %s\n", uv_strerror(status));
     }
-    free_write_req(req);
+    // Close the socket
+    // uv_close((uv_handle_t*)req->handle, on_close);
 }
 
-void echo_read_buffer(uv_stream_t* client, ssize_t nread, const uv_buf_t* buf) {
+int handle_on_message_complete(llhttp_t* parser) {
+    printf("HTTP message\n");
+    client_t* client = (client_t*)parser->data;
+    uv_write((uv_write_t*)&client->write_req, (uv_stream_t*)client, &response_buf, 1, echo_write);
+    return 1;
+};
+
+#define RESPONSE \
+    "HTTP/1.1 200 OK\r\n" \
+    "Content-Type: text/plain\r\n" \
+    "Content-Lenght: 12\r\n" \
+    "\r\n" \
+    "hello world\n"
+
+void echo_read_buffer(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     // Read data into allocated buffer, for now echo data
-    if (nread > 0) {
-        write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
-        req->buf = uv_buf_init(buf->base, nread);
-        uv_write((uv_write_t*)req, client, &req->buf, 1, echo_write);
-        return;
+
+    client_t* client = (client_t*)handle;
+
+    if (nread >= 0) {
+        // write(1, buf->base, nread);
+        // Need to parse http
+        enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
+        if (err == HPE_OK) {
+            /* Successfully parsed! */
+            printf("Successfully parsed\n");
+        }
+        else {
+            fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
+        }
+
+        // Start response
+        printf("HTTP message\n");
+        uv_write((uv_write_t*)&client->write_req, (uv_stream_t*)client, &response_buf, 1, echo_write);
+
+
+
+
+        // uv_write((uv_write_t*)&client->write_req, handle, &response_buf, 1, echo_write);
+        // write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
+        // req->buf = uv_buf_init(buf->base, nread);
+        // uv_write((uv_write_t*)req, handle, &req->buf, 1, echo_write);
+        // printf("sent response\n");
+        // return;
     }
+    else {
+        // Might be an error, probably an EOF, but regardless, close the connection
+        uv_close((uv_handle_t*)handle, on_close);
+    }
+
+
     if (nread < 0) {
         if (nread != UV_EOF)
             fprintf(stderr, "Read error %s\n", uv_err_name(nread));
-        uv_close((uv_handle_t*)client, on_close);
+        printf("Closing...\n");
+        uv_close((uv_handle_t*)handle, on_close);
     }
     // Free up the buffer we allocated.
     free(buf->base);
+    // free(response_buf.base);
 }
 
 void alloc_buffer(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
     // Allocate some buffer to read data from socket
     printf("alloc buffer\n");
-    buf->base = malloc(suggested_size);
+    buf->base = (char*)malloc(suggested_size);
     buf->len = suggested_size;
 }
 
 void on_new_connection(struct uv_stream_s* handle, int status) {
     // Connection callback that handles a new incomming connection
-    assert(handle == &server);
+    // assert(handle == &server);
     printf("New connection...\n");
 
     if (status < 0) {
@@ -66,18 +122,27 @@ void on_new_connection(struct uv_stream_s* handle, int status) {
         return;
     }
 
-    uv_tcp_t* client = (uv_tcp_t*)malloc(sizeof(uv_tcp_t));
+    client_t* client = malloc(sizeof(client_t));
+    // uv_tcp_t* client = (uv_tcp_t*)malloc(sizeof(uv_tcp_t));
 
-    uv_tcp_init(uv_default_loop(), client);
+    llhttp_settings_init(&settings);
 
-    if (uv_accept((uv_stream_t*)&server, (uv_stream_t*)client) == 0) {
+    uv_tcp_init(uv_default_loop(), &client->client);
+
+    if (uv_accept((uv_stream_t*)&server, (uv_stream_t*)&client->client) == 0) {
         printf("Accepted connection\n");
-        uv_read_start((uv_stream_t*)client, alloc_buffer, echo_read_buffer);
+        llhttp_init(&client->parser, HTTP_BOTH, &settings);
+        client->parser.data = client;
+        uv_read_start((uv_stream_t*)&client->client, alloc_buffer, echo_read_buffer);
     }
 }
 
 int main() {
     uv_tcp_init(uv_default_loop(), &server);
+
+    settings.on_message_complete = handle_on_message_complete;
+    response_buf.base = RESPONSE;
+    response_buf.len = sizeof(RESPONSE);
 
     uv_ip4_addr("0.0.0.0", DEFAULT_PORT, &addr);
 
