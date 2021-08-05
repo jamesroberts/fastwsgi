@@ -1,6 +1,5 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <assert.h>
 
 #include "uv.h"
 #include "llhttp.h"
@@ -19,6 +18,8 @@ const static int BACKLOG = 256;
 static uv_tcp_t server;
 static llhttp_settings_t parser_settings;
 static uv_buf_t response_buf;
+
+uv_loop_t* loop;
 
 struct sockaddr_in addr;
 
@@ -82,7 +83,7 @@ void connection_cb(struct uv_stream_s* handle, int status) {
 
     llhttp_settings_init(&parser_settings);
 
-    uv_tcp_init(uv_default_loop(), &client->handle);
+    uv_tcp_init(loop, &client->handle);
 
     if (uv_accept((uv_stream_t*)&server, (uv_stream_t*)&client->handle) == 0) {
         llhttp_init(&client->parser, HTTP_BOTH, &parser_settings);
@@ -104,7 +105,9 @@ void configure_parser_settings() {
 int main() {
     configure_parser_settings();
 
-    uv_tcp_init(uv_default_loop(), &server);
+    loop = uv_default_loop();
+
+    uv_tcp_init(loop, &server);
 
     response_buf.base = SIMPLE_RESPONSE;
     response_buf.len = sizeof(SIMPLE_RESPONSE);
@@ -122,5 +125,5 @@ int main() {
         fprintf(stderr, "Listen error %s\n", uv_strerror(r));
         return 1;
     }
-    return uv_run(uv_default_loop(), UV_RUN_DEFAULT);
+    return uv_run(loop, UV_RUN_DEFAULT);
 }
