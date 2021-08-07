@@ -4,12 +4,14 @@
 #include "uv.h"
 #include "llhttp.h"
 
+#include "server.h"
+
 #define SIMPLE_RESPONSE \
-    "HTTP/1.1 200 OK\r\n" \
-    "Content-Type: text/plain\r\n" \
-    "Content-Length: 14\r\n" \
-    "\r\n" \
-    "Hello, World!\n"
+  "HTTP/1.1 200 OK\r\n" \
+  "Content-Type: text/plain\r\n" \
+  "Content-Length: 14\r\n" \
+  "\r\n" \
+  "Hello, World!\n"
 
 const static char* HOST = "0.0.0.0";
 const static int PORT = 5000;
