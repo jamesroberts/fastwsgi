@@ -23,7 +23,7 @@ static uv_tcp_t server;
 
 static void set_header(PyObject* headers, PyObject* key, const char* value, size_t length) {
     printf("setting header: %s\n", value);
-    PyObject* item = PyUnicode_FromString(value);
+    PyObject* item = PyUnicode_FromStringAndSize(value, length);
     PyDict_SetItem(headers, key, item);
     Py_DECREF(item);
 }
@@ -35,23 +35,18 @@ int on_message_complete(llhttp_t* parser) {
 
 int on_url(llhttp_t* parser, const char* url, size_t length) {
     printf("on url\n");
-
-    char path[length];
-    memcpy(path, url, length);
-
     Request* request = (Request*)parser->data;
-    request->headers = PyDict_New();
-    PyObject* header = PyUnicode_FromString("url");
+    PyObject* header = Py_BuildValue("s", "url");
 
     Py_INCREF(header);
-    set_header(request->headers, header, path, length);
+    set_header(request->headers, header, url, length);
     return 0;
 };
 
 int on_body(llhttp_t* parser, const char* body, size_t length) {
     printf("on body\n");
     Request* request = (Request*)parser->data;
-    PyObject* header = PyUnicode_FromString("body");
+    PyObject* header = Py_BuildValue("s", "body");
     Py_INCREF(header);
     set_header(request->headers, header, body, length);
     return 0;
@@ -62,12 +57,8 @@ PyObject* current_header;
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     printf("on header field\n");
     Request* request = (Request*)parser->data;
-
-    char field[length];
-    memcpy(field, header, length);
-    printf("%s\n", field);
-
-    current_header = PyUnicode_FromStringAndSize(field, length);
+    current_header = PyUnicode_FromStringAndSize(header, length);
+    printf("test\n");
     Py_INCREF(current_header);
     return 0;
 };
@@ -75,9 +66,7 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
 int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     printf("on header value\n");
     Request* request = (Request*)parser->data;
-    char header_value[length];
-    memcpy(header_value, value, length);
-    set_header(request->headers, current_header, header_value, length);
+    set_header(request->headers, current_header, value, length);
     return 0;
 };
 
