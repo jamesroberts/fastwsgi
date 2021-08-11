@@ -6,6 +6,8 @@
 
 #include "server.h"
 
+#include "request.h"
+
 #define SIMPLE_RESPONSE \
   "HTTP/1.1 200 OK\r\n" \
   "Content-Type: text/plain\r\n" \
@@ -18,23 +20,81 @@ const static int PORT = 5000;
 const static int BACKLOG = 256;
 
 static uv_tcp_t server;
+
+static void set_header(PyObject* headers, PyObject* key, const char* value, size_t length) {
+    printf("setting header: %s\n", value);
+    PyObject* item = PyUnicode_FromString(value);
+    PyDict_SetItem(headers, key, item);
+    Py_DECREF(item);
+}
+
+int on_message_complete(llhttp_t* parser) {
+    printf("on message complete\n");
+    return 0;
+};
+
+int on_url(llhttp_t* parser, const char* url, size_t length) {
+    printf("on url\n");
+
+    char path[length];
+    memcpy(path, url, length);
+
+    Request* request = (Request*)parser->data;
+    request->headers = PyDict_New();
+    PyObject* header = PyUnicode_FromString("url");
+
+    Py_INCREF(header);
+    set_header(request->headers, header, path, length);
+    return 0;
+};
+
+int on_body(llhttp_t* parser, const char* body, size_t length) {
+    printf("on body\n");
+    Request* request = (Request*)parser->data;
+    PyObject* header = PyUnicode_FromString("body");
+    Py_INCREF(header);
+    set_header(request->headers, header, body, length);
+    return 0;
+};
+
+PyObject* current_header;
+
+int on_header_field(llhttp_t* parser, const char* header, size_t length) {
+    printf("on header field\n");
+    Request* request = (Request*)parser->data;
+
+    char field[length];
+    memcpy(field, header, length);
+    printf("%s\n", field);
+
+    current_header = PyUnicode_FromStringAndSize(field, length);
+    Py_INCREF(current_header);
+    return 0;
+};
+
+int on_header_value(llhttp_t* parser, const char* value, size_t length) {
+    printf("on header value\n");
+    Request* request = (Request*)parser->data;
+    char header_value[length];
+    memcpy(header_value, value, length);
+    set_header(request->headers, current_header, header_value, length);
+    return 0;
+};
+
+int on_message_begin(llhttp_t* parser) {
+    printf("on message begin\n");
+    Request* request = (Request*)parser->data;
+    request->headers = PyDict_New();
+    return 0;
+};
+
 static llhttp_settings_t parser_settings;
+
 static uv_buf_t response_buf;
 
 uv_loop_t* loop;
 
 struct sockaddr_in addr;
-
-typedef struct {
-    uv_write_t req;
-    uv_buf_t buf;
-} write_req_t;
-
-typedef struct {
-    uv_tcp_t handle;
-    llhttp_t parser;
-    write_req_t write_req;
-} client_t;
 
 void close_cb(uv_handle_t* handle) {
     printf("disconnected\n");
@@ -50,12 +110,12 @@ void write_cb(uv_write_t* req, int status) {
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t* client = (client_t*)handle;
-
     if (nread >= 0) {
         enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
         if (err == HPE_OK) {
             printf("Successfully parsed\n");
-            uv_write((uv_write_t*)&client->write_req, (uv_stream_t*)client, &response_buf, 1, write_cb);
+            uv_write_t* req = (uv_write_t*)&client->write_req;
+            uv_write(req, handle, &response_buf, 1, write_cb);
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
@@ -83,33 +143,34 @@ void connection_cb(struct uv_stream_s* handle, int status) {
 
     client_t* client = malloc(sizeof(client_t));
 
-    llhttp_settings_init(&parser_settings);
-
     uv_tcp_init(loop, &client->handle);
 
     if (uv_accept((uv_stream_t*)&server, (uv_stream_t*)&client->handle) == 0) {
-        llhttp_init(&client->parser, HTTP_BOTH, &parser_settings);
-        client->parser.data = client;
+        Request* request = malloc(sizeof(Request));
+        llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
+        client->parser.data = request;
+
+        // llhttp_init(&client->parser, HTTP_BOTH, &parser_settings);
+        // client->parser.data = client;
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
     }
 }
 
-int handle_on_message_complete(llhttp_t* parser) {
-    client_t* client = (client_t*)parser->data;
-    uv_write((uv_write_t*)&client->write_req, (uv_stream_t*)client, &response_buf, 1, write_cb);
-    return 1;
-};
-
 void configure_parser_settings() {
-    parser_settings.on_message_complete = handle_on_message_complete;
+    parser_settings.on_url = on_url;
+    parser_settings.on_body = on_body;
+    parser_settings.on_header_field = on_header_field;
+    parser_settings.on_header_value = on_header_value;
+    parser_settings.on_message_begin = on_message_begin;
+    parser_settings.on_message_complete = on_message_complete;
 }
 
 int main() {
-    configure_parser_settings();
-
     loop = uv_default_loop();
 
     uv_tcp_init(loop, &server);
+    llhttp_settings_init(&parser_settings);
+    configure_parser_settings();
 
     response_buf.base = SIMPLE_RESPONSE;
     response_buf.len = sizeof(SIMPLE_RESPONSE);
