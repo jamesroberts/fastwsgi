@@ -183,8 +183,11 @@ int main() {
     return uv_run(loop, UV_RUN_DEFAULT);
 }
 
-PyObject* run_server(PyObject* self, PyObject* app_func) {
-    app = app_func;
+PyObject* run_server(PyObject* self, PyObject* args) {
+    PyArg_UnpackTuple(args, "ref", 1, 1, &app);
+    PyObject* retval = PyObject_CallFunctionObjArgs(
+        app, Py_BuildValue("s", "======> String from C!"), NULL
+    );
     // main();
     return Py_BuildValue("s", "'run_server' function executed");
 }
