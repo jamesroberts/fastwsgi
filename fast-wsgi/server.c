@@ -15,9 +15,11 @@
   "\r\n" \
   "Hello, World!\n"
 
-const static char* HOST = "0.0.0.0";
-const static int PORT = 5000;
-const static int BACKLOG = 256;
+static const char* HOST = "0.0.0.0";
+static const int PORT = 5000;
+static const int BACKLOG = 256;
+
+PyObject* app;
 
 static uv_tcp_t server;
 
@@ -28,8 +30,10 @@ static void set_header(PyObject* headers, PyObject* key, const char* value, size
     Py_DECREF(item);
 }
 
-int on_message_complete(llhttp_t* parser) {
-    printf("on message complete\n");
+int on_message_begin(llhttp_t* parser) {
+    printf("on message begin\n");
+    Request* request = (Request*)parser->data;
+    request->headers = PyDict_New();
     return 0;
 };
 
@@ -58,7 +62,6 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     printf("on header field\n");
     Request* request = (Request*)parser->data;
     current_header = PyUnicode_FromStringAndSize(header, length);
-    printf("test\n");
     Py_INCREF(current_header);
     return 0;
 };
@@ -70,10 +73,8 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     return 0;
 };
 
-int on_message_begin(llhttp_t* parser) {
-    printf("on message begin\n");
-    Request* request = (Request*)parser->data;
-    request->headers = PyDict_New();
+int on_message_complete(llhttp_t* parser) {
+    printf("on message complete\n");
     return 0;
 };
 
@@ -116,6 +117,8 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         uv_close((uv_handle_t*)handle, close_cb);
     }
     free(buf->base);
+    Request* request = (Request*)client->parser.data;
+    free(request);
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -178,4 +181,10 @@ int main() {
         return 1;
     }
     return uv_run(loop, UV_RUN_DEFAULT);
+}
+
+PyObject* run_server(PyObject* self, PyObject* app_func) {
+    app = app_func;
+    // main();
+    return Py_BuildValue("s", "'run_server' function executed");
 }

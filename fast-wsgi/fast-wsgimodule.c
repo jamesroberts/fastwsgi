@@ -1,12 +1,8 @@
 #include <Python.h>
 #include "server.h"
 
-static PyObject* test(PyObject* self, PyObject* args) {
-  Py_RETURN_NONE;
-}
-
 static PyMethodDef FastWsgiFunctions[] = {
-    {"test", test, METH_VARARGS, "test function."},
+    {"test", run_server, METH_VARARGS, "test function."},
     {NULL, NULL, 0, NULL}
 };
 

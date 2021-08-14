@@ -18,4 +18,6 @@ typedef struct {
     write_req_t write_req;
 } client_t;
 
-// void run_server(ServerArgs*);
+// void run_server(PyObject*);
+
+PyObject* run_server(PyObject* self, PyObject* args);
