@@ -2,6 +2,8 @@
 #include "uv.h"
 #include "llhttp.h"
 
+PyObject* wsgi_app;
+
 typedef struct {
     PyObject* host;
     PyObject* port;
@@ -17,7 +19,5 @@ typedef struct {
     llhttp_t parser;
     write_req_t write_req;
 } client_t;
-
-// void run_server(PyObject*);
 
 PyObject* run_server(PyObject* self, PyObject* args);

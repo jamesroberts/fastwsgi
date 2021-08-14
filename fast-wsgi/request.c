@@ -54,10 +54,15 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
 
 int on_message_complete(llhttp_t* parser) {
     printf("on message complete\n");
+    Request* request = (Request*)parser->data;
+    PyObject_CallFunctionObjArgs(
+        wsgi_app, request->headers, NULL
+    );
     return 0;
 };
 
 void configure_parser_settings() {
+    llhttp_settings_init(&parser_settings);
     parser_settings.on_url = on_url;
     parser_settings.on_body = on_body;
     parser_settings.on_header_field = on_header_field;

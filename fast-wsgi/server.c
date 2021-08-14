@@ -15,10 +15,8 @@
   "Hello, World!\n"
 
 static const char* HOST = "0.0.0.0";
-static const int PORT = 5001;
+static const int PORT = 5000;
 static const int BACKLOG = 256;
-
-PyObject* app;
 
 static uv_tcp_t server;
 
@@ -83,9 +81,6 @@ void connection_cb(struct uv_stream_s* handle, int status) {
         Request* request = malloc(sizeof(Request));
         llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
         client->parser.data = request;
-
-        // llhttp_init(&client->parser, HTTP_BOTH, &parser_settings);
-        // client->parser.data = client;
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
     }
 }
@@ -94,7 +89,7 @@ int main() {
     loop = uv_default_loop();
 
     uv_tcp_init(loop, &server);
-    llhttp_settings_init(&parser_settings);
+
     configure_parser_settings();
 
     response_buf.base = SIMPLE_RESPONSE;
@@ -117,10 +112,7 @@ int main() {
 }
 
 PyObject* run_server(PyObject* self, PyObject* args) {
-    PyArg_UnpackTuple(args, "ref", 1, 1, &app);
-    PyObject_CallFunctionObjArgs(
-        app, Py_BuildValue("s", "======> String from C!"), NULL
-    );
-    // main();
+    PyArg_UnpackTuple(args, "ref", 1, 1, &wsgi_app);
+    main();
     return Py_BuildValue("s", "'run_server' function executed");
 }

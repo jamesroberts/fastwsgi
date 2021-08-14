@@ -3,6 +3,7 @@ from distutils.core import Extension, setup
 
 SOURCE_FILES = ['fast-wsgi/fast-wsgimodule.c',
                 'fast-wsgi/server.c',
+                'fast-wsgi/request.c',
                 'llhttp/src/api.c',
                 'llhttp/src/http.c',
                 'llhttp/src/llhttp.c']
