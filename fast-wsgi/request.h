@@ -5,6 +5,8 @@ typedef struct {
 Request* new_request(client_t* client);
 void free_request(Request*);
 
+PyObject* current_header;
+
 llhttp_settings_t parser_settings;
 void configure_parser_settings();
 int on_message_begin(llhttp_t* parser);

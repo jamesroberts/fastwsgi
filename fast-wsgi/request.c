@@ -35,8 +35,6 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
     return 0;
 };
 
-PyObject* current_header;
-
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     printf("on header field\n");
     Request* request = (Request*)parser->data;
