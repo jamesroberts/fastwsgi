@@ -14,6 +14,6 @@ static struct PyModuleDef module = {
     FastWsgiFunctions,
 };
 
-PyMODINIT_FUNC PyInit_fast_wsgi(void) {
+PyMODINIT_FUNC PyInit__fast_wsgi(void) {
   return PyModule_Create(&module);
 }

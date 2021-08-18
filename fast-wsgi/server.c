@@ -14,17 +14,6 @@
   "\r\n" \
   "Hello, World!\n"
 
-static const char* HOST = "0.0.0.0";
-static const int PORT = 5000;
-static const int BACKLOG = 256;
-
-static uv_tcp_t server;
-
-static uv_buf_t response_buf;
-
-uv_loop_t* loop;
-
-struct sockaddr_in addr;
 
 void close_cb(uv_handle_t* handle) {
     printf("disconnected\n");
@@ -95,7 +84,7 @@ int main() {
     response_buf.base = SIMPLE_RESPONSE;
     response_buf.len = sizeof(SIMPLE_RESPONSE);
 
-    uv_ip4_addr(HOST, PORT, &addr);
+    uv_ip4_addr(host, port, &addr);
 
     int r = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
     if (r) {
@@ -103,7 +92,7 @@ int main() {
         return 1;
     }
 
-    r = uv_listen((uv_stream_t*)&server, BACKLOG, connection_cb);
+    r = uv_listen((uv_stream_t*)&server, backlog, connection_cb);
     if (r) {
         fprintf(stderr, "Listen error %s\n", uv_strerror(r));
         return 1;
@@ -112,7 +101,7 @@ int main() {
 }
 
 PyObject* run_server(PyObject* self, PyObject* args) {
-    PyArg_UnpackTuple(args, "ref", 1, 1, &wsgi_app);
+    PyArg_ParseTuple(args, "Osii", &wsgi_app, &host, &port, &backlog);
     main();
     return Py_BuildValue("s", "'run_server' function executed");
 }

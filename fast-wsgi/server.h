@@ -3,11 +3,15 @@
 #include "llhttp.h"
 
 PyObject* wsgi_app;
+char* host;
+int port;
+int backlog;
 
-typedef struct {
-    PyObject* host;
-    PyObject* port;
-} ServerArgs;
+uv_tcp_t server;
+uv_buf_t response_buf;
+uv_loop_t* loop;
+
+struct sockaddr_in addr;
 
 typedef struct {
     uv_write_t req;
