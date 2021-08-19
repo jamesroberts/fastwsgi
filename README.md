@@ -9,6 +9,11 @@ It is mostly written in C. It makes use of [libuv](https://github.com/libuv/libu
 
 ** Fast WSGI is still under development...
 
+## TODO
 
-
+- Memory lifecycle management
+- Python object ref count tracking
+- WSGI app invoking
+- Test integration with flask app
+- Basic error handling
 
