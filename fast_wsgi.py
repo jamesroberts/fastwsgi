@@ -9,7 +9,12 @@ def run(wsgi_app, host, port, backlog=256):
         print("Closing...")
 
 
+def callback(environ):
+    print("Callback invoked")
+    print(environ)
+
+
 print("Running...")
-run({}, "0.0.0.0", 5000)
+run(callback, "0.0.0.0", 5000)
 # TODO: Shutdown on Ctrl-C somehow
 print("Done")
