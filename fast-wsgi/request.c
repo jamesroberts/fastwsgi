@@ -37,11 +37,10 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
 
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     printf("on header field\n");
-    Request* request = (Request*)parser->data;
     PyObject* HTTP_ = PyUnicode_FromString("HTTP_");
 
     char upperHeader[length];
-    for (int i = 0; i < length; i++) {
+    for (size_t i = 0; i < length; i++) {
         upperHeader[i] = toupper(header[i]);
     }
     PyObject* uppercaseHeader = PyUnicode_FromStringAndSize(upperHeader, length);
@@ -70,8 +69,8 @@ int on_message_complete(llhttp_t* parser) {
 
 void build_wsgi_environ(llhttp_t* parser) {
     Request* request = (Request*)parser->data;
-    char* method = llhttp_method_name(parser->method);
-    char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
+    const char* method = llhttp_method_name(parser->method);
+    const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
     PyObject* wsgi_version = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
 
     // Find a better way to set these

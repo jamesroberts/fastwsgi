@@ -5,6 +5,8 @@ typedef struct {
 Request* new_request(client_t* client);
 void free_request(Request*);
 
+void build_wsgi_environ(llhttp_t* parser);
+
 PyObject* current_header;
 
 llhttp_settings_t parser_settings;
