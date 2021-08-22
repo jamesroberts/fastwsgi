@@ -97,4 +97,3 @@ void configure_parser_settings() {
     parser_settings.on_message_begin = on_message_begin;
     parser_settings.on_message_complete = on_message_complete;
 }
-

@@ -86,6 +86,13 @@ int main() {
 
     uv_ip4_addr(host, port, &addr);
 
+    uv_tcp_init_ex(loop, &server, AF_INET);
+
+    uv_fileno((const uv_handle_t*)&server, &fd);
+
+    int enabled = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof(&enabled));
+
     int r = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
     if (r) {
         fprintf(stderr, "Bind error %s\n", uv_strerror(r));
