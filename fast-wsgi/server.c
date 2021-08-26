@@ -46,8 +46,8 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         uv_close((uv_handle_t*)handle, close_cb);
     }
     free(buf->base);
-    Request* request = (Request*)client->parser.data;
-    free(request);
+    free(client->parser.data);
+    // free(request);
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -88,10 +88,10 @@ int main() {
 
     uv_tcp_init_ex(loop, &server, AF_INET);
 
-    uv_fileno((const uv_handle_t*)&server, &fd);
+    uv_fileno((const uv_handle_t*)&server, &file_descriptor);
 
     int enabled = 1;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof(&enabled));
+    setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof(&enabled));
 
     int r = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
     if (r) {

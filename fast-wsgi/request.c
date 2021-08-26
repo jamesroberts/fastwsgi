@@ -41,7 +41,13 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
 
     char upperHeader[length];
     for (size_t i = 0; i < length; i++) {
-        upperHeader[i] = toupper(header[i]);
+        char current = header[i];
+        if (current == '-') {
+            upperHeader[i] = '_';
+        }
+        else {
+            upperHeader[i] = toupper(current);
+        }
     }
     PyObject* uppercaseHeader = PyUnicode_FromStringAndSize(upperHeader, length);
 

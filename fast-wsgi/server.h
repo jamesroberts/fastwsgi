@@ -10,7 +10,7 @@ int backlog;
 uv_tcp_t server;
 uv_buf_t response_buf;
 uv_loop_t* loop;
-uv_os_fd_t fd;
+uv_os_fd_t file_descriptor;
 
 struct sockaddr_in addr;
 
