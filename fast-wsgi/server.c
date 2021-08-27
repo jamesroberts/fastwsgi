@@ -6,6 +6,7 @@
 
 #include "server.h"
 #include "request.h"
+#include "constants.h"
 
 #define SIMPLE_RESPONSE \
   "HTTP/1.1 200 OK\r\n" \
@@ -16,7 +17,7 @@
 
 
 void close_cb(uv_handle_t* handle) {
-    printf("disconnected\n");
+    // printf("disconnected\n");
     free(handle);
 }
 
@@ -32,7 +33,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     if (nread >= 0) {
         enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
         if (err == HPE_OK) {
-            printf("Successfully parsed\n");
+            // printf("Successfully parsed\n");
             uv_write_t* req = (uv_write_t*)&client->write_req;
             uv_write(req, handle, &response_buf, 1, write_cb);
         }
@@ -51,7 +52,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    printf("Allocating buffer\n");
+    // printf("Allocating buffer\n");
     buf->base = malloc(suggested_size);
     buf->len = suggested_size;
 }
@@ -80,6 +81,7 @@ int main() {
     uv_tcp_init(loop, &server);
 
     configure_parser_settings();
+    init_constants();
 
     response_buf.base = SIMPLE_RESPONSE;
     response_buf.len = sizeof(SIMPLE_RESPONSE);

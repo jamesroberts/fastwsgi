@@ -2,6 +2,10 @@ typedef struct {
     PyObject* headers;
 } Request;
 
+typedef struct {
+    PyObject ob_base;
+} StartResponse;
+
 Request* new_request(client_t* client);
 void free_request(Request*);
 

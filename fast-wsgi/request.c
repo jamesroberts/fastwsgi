@@ -1,6 +1,7 @@
 #include "server.h"
 #include "request.h"
 #include "llhttp.h"
+#include "constants.h"
 
 static void set_header(PyObject* headers, PyObject* key, const char* value, size_t length) {
     printf("setting header\n");
@@ -63,12 +64,44 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     return 0;
 };
 
+PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs)
+{
+    PyObject* status = NULL;
+    PyObject* response_headers = NULL;
+    PyObject* exc_info = NULL;
+    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &status, &response_headers, &exc_info))
+        return NULL;
+
+    if (status == NULL) {
+        printf("NULL status\n");
+        return NULL;
+    }
+    if (response_headers == NULL) {
+        printf("NULL response_headers\n");
+        return NULL;
+    }
+    Py_RETURN_NONE;
+}
+
+PyTypeObject StartResponse_Type = {
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "start_response",
+    sizeof(StartResponse),
+    0,
+    (destructor)PyObject_FREE,
+    0, 0, 0, 0, 0, 0, 0, 0, 0,
+    start_response_call
+};
+
 int on_message_complete(llhttp_t* parser) {
     printf("on message complete\n");
     Request* request = (Request*)parser->data;
     build_wsgi_environ(parser);
+
+    StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
+
     PyObject_CallFunctionObjArgs(
-        wsgi_app, request->headers, NULL
+        wsgi_app, request->headers, start_response, NULL
     );
     return 0;
 };
@@ -76,22 +109,23 @@ int on_message_complete(llhttp_t* parser) {
 void build_wsgi_environ(llhttp_t* parser) {
     Request* request = (Request*)parser->data;
     const char* method = llhttp_method_name(parser->method);
-    const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
+    PyObject* protocol = parser->http_minor == 1 ? HTTP_1_1 : HTTP_1_0;
     PyObject* wsgi_version = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
 
     // Find a better way to set these
     // https://www.python.org/dev/peps/pep-3333/#specification-details
-    PyDict_SetItemString(request->headers, "REQUEST_METHOD", PyUnicode_FromString(method));
-    PyDict_SetItemString(request->headers, "SCRIPT_NAME", PyUnicode_FromString(""));
-    PyDict_SetItemString(request->headers, "SERVER_NAME", PyUnicode_FromString(host));
-    PyDict_SetItemString(request->headers, "SERVER_PORT", PyUnicode_FromString("port"));
-    PyDict_SetItemString(request->headers, "SERVER_PROTOCOL", PyUnicode_FromString(protocol));
-    PyDict_SetItemString(request->headers, "wsgi.version", wsgi_version);
-    PyDict_SetItemString(request->headers, "wsgi.url_scheme", PyUnicode_FromString("http"));
-    PyDict_SetItemString(request->headers, "wsgi.errors", PySys_GetObject("stderr"));
-    PyDict_SetItemString(request->headers, "wsgi.run_once", Py_False);
-    PyDict_SetItemString(request->headers, "wsgi.multithread", Py_False);
-    PyDict_SetItemString(request->headers, "wsgi.multiprocess", Py_True);
+    PyObject* headers = request->headers;
+    PyDict_SetItem(headers, REQUEST_METHOD, PyUnicode_FromString(method));
+    PyDict_SetItem(headers, SCRIPT_NAME, empty_string);
+    PyDict_SetItem(headers, SERVER_NAME, server_host);
+    PyDict_SetItem(headers, SERVER_PORT, server_port);
+    PyDict_SetItem(headers, SERVER_PROTOCOL, protocol);
+    PyDict_SetItem(headers, wsgi_version, wsgi_version);
+    PyDict_SetItem(headers, wsgi_url_scheme, http_scheme);
+    PyDict_SetItem(headers, wsgi_errors, PySys_GetObject("stderr"));
+    PyDict_SetItem(headers, wsgi_run_once, Py_False);
+    PyDict_SetItem(headers, wsgi_multithread, Py_False);
+    PyDict_SetItem(headers, wsgi_multiprocess, Py_True);
 }
 
 void configure_parser_settings() {
