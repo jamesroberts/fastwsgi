@@ -2,7 +2,7 @@
 #include "server.h"
 
 static PyMethodDef FastWsgiFunctions[] = {
-    {"run_server", run_server, METH_VARARGS, "test function."},
+    {"run_server", run_server, METH_VARARGS, ""},
     {NULL, NULL, 0, NULL}
 };
 

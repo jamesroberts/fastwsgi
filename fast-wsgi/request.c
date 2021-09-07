@@ -7,6 +7,7 @@ static void set_header(PyObject* headers, PyObject* key, const char* value, size
     printf("setting header\n");
     PyObject* item = PyUnicode_FromStringAndSize(value, length);
     PyDict_SetItem(headers, key, item);
+    Py_DECREF(key);
     Py_DECREF(item);
 }
 
@@ -24,6 +25,7 @@ int on_url(llhttp_t* parser, const char* url, size_t length) {
 
     Py_INCREF(header);
     set_header(request->headers, header, url, length);
+    Py_DECREF(header);
     return 0;
 };
 
@@ -33,6 +35,7 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
     PyObject* header = Py_BuildValue("s", "body");
     Py_INCREF(header);
     set_header(request->headers, header, body, length);
+    Py_DECREF(header);
     return 0;
 };
 
@@ -54,6 +57,9 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
 
     current_header = PyUnicode_Concat(HTTP_, uppercaseHeader);
     Py_INCREF(current_header);
+    Py_DECREF(uppercaseHeader);
+    Py_DECREF(HTTP_);
+
     return 0;
 };
 
@@ -61,6 +67,7 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     printf("on header value\n");
     Request* request = (Request*)parser->data;
     set_header(request->headers, current_header, value, length);
+    Py_DECREF(current_header);
     return 0;
 };
 
@@ -100,9 +107,12 @@ int on_message_complete(llhttp_t* parser) {
 
     StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
 
-    PyObject_CallFunctionObjArgs(
+    PyObject* wsgi_response = PyObject_CallFunctionObjArgs(
         wsgi_app, request->headers, start_response, NULL
     );
+
+    Py_DECREF(start_response);
+    Py_DECREF(wsgi_response);
     return 0;
 };
 
@@ -110,7 +120,6 @@ void build_wsgi_environ(llhttp_t* parser) {
     Request* request = (Request*)parser->data;
     const char* method = llhttp_method_name(parser->method);
     PyObject* protocol = parser->http_minor == 1 ? HTTP_1_1 : HTTP_1_0;
-    PyObject* wsgi_version = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
 
     // Find a better way to set these
     // https://www.python.org/dev/peps/pep-3333/#specification-details
@@ -120,12 +129,14 @@ void build_wsgi_environ(llhttp_t* parser) {
     PyDict_SetItem(headers, SERVER_NAME, server_host);
     PyDict_SetItem(headers, SERVER_PORT, server_port);
     PyDict_SetItem(headers, SERVER_PROTOCOL, protocol);
-    PyDict_SetItem(headers, wsgi_version, wsgi_version);
+    PyDict_SetItem(headers, wsgi_version, version);
     PyDict_SetItem(headers, wsgi_url_scheme, http_scheme);
     PyDict_SetItem(headers, wsgi_errors, PySys_GetObject("stderr"));
     PyDict_SetItem(headers, wsgi_run_once, Py_False);
     PyDict_SetItem(headers, wsgi_multithread, Py_False);
     PyDict_SetItem(headers, wsgi_multiprocess, Py_True);
+
+    Py_DECREF(protocol);
 }
 
 void configure_parser_settings() {

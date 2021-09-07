@@ -13,7 +13,7 @@ void init_constants() {
     wsgi_run_once = PyUnicode_FromString("wsgi.run_once");
     wsgi_multithread = PyUnicode_FromString("wsgi.multithread");
     wsgi_multiprocess = PyUnicode_FromString("wsgi.multiprocess");
-    wsgi_version = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
+    version = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
 
     http_scheme = PyUnicode_FromString("http");
     HTTP_1_1 = PyUnicode_FromString("HTTP/1.1");
