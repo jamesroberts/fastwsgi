@@ -46,7 +46,11 @@ class TestMiddleware:
     def __call__(self, environ, start_response):
         print("Middleware!")
         print(environ)
-        return self.app(environ, start_response)
+        response = self.app(environ, start_response)
+        print("================")
+        print(response)
+        print("================")
+        return response
 
 
 app = Flask(__name__)

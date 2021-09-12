@@ -73,17 +73,15 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
 
 PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs)
 {
-    PyObject* status = NULL;
-    PyObject* response_headers = NULL;
-    PyObject* exc_info = NULL;
-    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &status, &response_headers, &exc_info))
+    StartResponse* response = (StartResponse*)self;
+    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &response->status, &response->headers, &response->exc_info))
         return NULL;
 
-    if (status == NULL) {
+    if (&response->status == NULL) {
         printf("NULL status\n");
         return NULL;
     }
-    if (response_headers == NULL) {
+    if (&response->headers == NULL) {
         printf("NULL response_headers\n");
         return NULL;
     }
@@ -111,10 +109,45 @@ int on_message_complete(llhttp_t* parser) {
         wsgi_app, request->headers, start_response, NULL
     );
 
+    build_response(wsgi_response, start_response);
+
     Py_DECREF(start_response);
     Py_DECREF(wsgi_response);
     return 0;
 };
+
+void build_response(PyObject* wsgi_response, StartResponse* response) {
+    // TODO: This method needs fixing...
+
+    PyObject* iter = PyObject_GetIter(wsgi_response);
+    PyObject* result = PyIter_Next(iter);
+
+    char* buf = "HTTP/1.1";
+    asprintf(&buf, "%s %s", buf, "200 OK\r\n");
+    printf("Starting adding headers\n");
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); ++i) {
+        printf("In loop\n");
+        // Seg fault here
+        PyObject* tuple = PyList_GET_ITEM(response->headers, i);
+        printf("Got tuple...\n");
+        PyObject* field = PyTuple_GET_ITEM(tuple, 0);
+        printf("got field\n");
+        PyObject* value = PyTuple_GET_ITEM(tuple, 1);
+        printf("Extracted Tuple\n");
+        asprintf(&buf, "%s%s", buf, "\r\n");
+        printf("Added return to buffer\n");
+        asprintf(&buf, "%s%s", buf, PyBytes_AS_STRING(field));
+        printf("Added field to buffer\n");
+        asprintf(&buf, "%s%s", buf, PyBytes_AS_STRING(value));
+        printf("Added to buffer\n");
+    }
+    printf("Finished loop\n");
+    asprintf(&buf, "%sContent-Length: %ld\r\n", buf, strlen(PyBytes_AS_STRING(result)));
+    asprintf(&buf, "%s\r\n%s", buf, PyBytes_AS_STRING(result));
+
+    response_buf.base = buf;
+    response_buf.len = strlen(buf);
+}
 
 void build_wsgi_environ(llhttp_t* parser) {
     Request* request = (Request*)parser->data;
