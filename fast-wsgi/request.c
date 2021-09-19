@@ -82,8 +82,7 @@ static void reprint(PyObject* obj) {
     Py_XDECREF(str);
 }
 
-PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs)
-{
+PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs) {
     Response* res = ((StartResponse*)self)->response;
     PyObject* exc_info = NULL;
     if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &res->status, &res->headers, &exc_info)) {
@@ -139,7 +138,7 @@ void build_response(PyObject* wsgi_response, Response* response) {
     PyObject* result = PyIter_Next(iter);
 
     char* buf = "HTTP/1.1";
-    asprintf(&buf, "%s %s", buf, "200 OK");
+    asprintf(&buf, "%s %s", buf, PyBytes_AsString(PyUnicode_AsUTF8String(response->status)));
 
     for (Py_ssize_t i = 0; i < PyList_Size(response->headers); ++i) {
         PyObject* tuple = PyList_GetItem(response->headers, i);

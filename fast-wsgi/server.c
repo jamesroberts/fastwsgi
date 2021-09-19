@@ -105,7 +105,12 @@ int main() {
         fprintf(stderr, "Listen error %s\n", uv_strerror(r));
         return 1;
     }
-    return uv_run(loop, UV_RUN_DEFAULT);
+
+    uv_run(loop, UV_RUN_DEFAULT);
+
+    uv_loop_close(loop);
+    free(loop);
+    return 0;
 }
 
 PyObject* run_server(PyObject* self, PyObject* args) {
