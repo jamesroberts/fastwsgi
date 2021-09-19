@@ -4,12 +4,6 @@ import _fast_wsgi
 
 from flask import Flask
 
-
-def callback(environ):
-    print("Callback invoked")
-    print(environ)
-
-
 NUM_WORKERS = 4
 HOST = "0.0.0.0"
 PORT = 5000
@@ -34,7 +28,7 @@ def run_multi_process_server(app):
         for _ in range(NUM_WORKERS):
             os.wait()
     except KeyboardInterrupt:
-        print("Stopping all workers")
+        print("\nStopping all workers")
         for worker in workers:
             os.kill(worker, signal.SIGINT)
 

@@ -74,6 +74,14 @@ void connection_cb(struct uv_stream_s* handle, int status) {
     }
 }
 
+void signal_handler(uv_signal_t* req, int signum) {
+    if (signum == SIGINT) {
+        uv_stop(loop);
+        uv_signal_stop(req);
+        exit(0);
+    }
+}
+
 int main() {
     loop = uv_default_loop();
 
@@ -105,6 +113,10 @@ int main() {
         fprintf(stderr, "Listen error %s\n", uv_strerror(r));
         return 1;
     }
+
+    uv_signal_t signal;
+    uv_signal_init(loop, &signal);
+    uv_signal_start(&signal, signal_handler, SIGINT);
 
     uv_run(loop, UV_RUN_DEFAULT);
 
