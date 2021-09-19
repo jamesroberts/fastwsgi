@@ -16,7 +16,7 @@ PORT = 5000
 BACKLOG = 1024
 
 
-def run_multi_process_server():
+def run_multi_process_server(app):
     workers = []
 
     for _ in range(NUM_WORKERS):
@@ -26,7 +26,7 @@ def run_multi_process_server():
             print(f"Worker process added with PID: {pid}")
         else:
             try:
-                _fast_wsgi.run_server(callback, HOST, PORT, BACKLOG)
+                _fast_wsgi.run_server(app, HOST, PORT, BACKLOG)
             except KeyboardInterrupt:
                 exit()
 
@@ -47,9 +47,7 @@ class TestMiddleware:
         print("Middleware!")
         print(environ)
         response = self.app(environ, start_response)
-        print("================")
         print(response)
-        print("================")
         return response
 
 
@@ -59,11 +57,12 @@ app = Flask(__name__)
 @app.route("/test")
 def hello_world():
     print("Request recieved!")
-    return "Hello, World!"
+    return {"message": "Hello, World!"}, 200
 
 
 app = TestMiddleware(app.wsgi_app)
 
 if __name__ == "__main__":
     print("Starting server...")
+    # run_multi_process_server(app)
     _fast_wsgi.run_server(app, HOST, PORT, BACKLOG)

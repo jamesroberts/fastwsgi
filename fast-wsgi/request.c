@@ -71,20 +71,36 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     return 0;
 };
 
+static void reprint(PyObject* obj) {
+    PyObject* repr = PyObject_Repr(obj);
+    PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
+    const char* bytes = PyBytes_AS_STRING(str);
+
+    printf("REPR: %s\n", bytes);
+
+    Py_XDECREF(repr);
+    Py_XDECREF(str);
+}
+
 PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs)
 {
-    StartResponse* response = (StartResponse*)self;
-    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &response->status, &response->headers, &response->exc_info))
+    Response* res = ((StartResponse*)self)->response;
+    PyObject* exc_info = NULL;
+    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &res->status, &res->headers, &exc_info)) {
+        printf("something went wrong\n");
         return NULL;
+    }
 
-    if (&response->status == NULL) {
+    if (response->status == NULL) {
         printf("NULL status\n");
         return NULL;
     }
-    if (&response->headers == NULL) {
+    if (response->headers == NULL) {
         printf("NULL response_headers\n");
         return NULL;
     }
+    Py_INCREF(res->headers);
+
     Py_RETURN_NONE;
 }
 
@@ -103,47 +119,39 @@ int on_message_complete(llhttp_t* parser) {
     Request* request = (Request*)parser->data;
     build_wsgi_environ(parser);
 
+    response = malloc(sizeof(Response));
     StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
+    start_response->response = response;
 
     PyObject* wsgi_response = PyObject_CallFunctionObjArgs(
         wsgi_app, request->headers, start_response, NULL
     );
 
-    build_response(wsgi_response, start_response);
+    build_response(wsgi_response, response);
 
     Py_DECREF(start_response);
     Py_DECREF(wsgi_response);
     return 0;
 };
 
-void build_response(PyObject* wsgi_response, StartResponse* response) {
-    // TODO: This method needs fixing...
-
+void build_response(PyObject* wsgi_response, Response* response) {
     PyObject* iter = PyObject_GetIter(wsgi_response);
     PyObject* result = PyIter_Next(iter);
 
     char* buf = "HTTP/1.1";
-    asprintf(&buf, "%s %s", buf, "200 OK\r\n");
-    printf("Starting adding headers\n");
-    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); ++i) {
-        printf("In loop\n");
-        // Seg fault here
-        PyObject* tuple = PyList_GET_ITEM(response->headers, i);
-        printf("Got tuple...\n");
-        PyObject* field = PyTuple_GET_ITEM(tuple, 0);
-        printf("got field\n");
-        PyObject* value = PyTuple_GET_ITEM(tuple, 1);
-        printf("Extracted Tuple\n");
-        asprintf(&buf, "%s%s", buf, "\r\n");
-        printf("Added return to buffer\n");
-        asprintf(&buf, "%s%s", buf, PyBytes_AS_STRING(field));
-        printf("Added field to buffer\n");
-        asprintf(&buf, "%s%s", buf, PyBytes_AS_STRING(value));
-        printf("Added to buffer\n");
+    asprintf(&buf, "%s %s", buf, "200 OK");
+
+    for (Py_ssize_t i = 0; i < PyList_Size(response->headers); ++i) {
+        PyObject* tuple = PyList_GetItem(response->headers, i);
+        PyObject* field = PyTuple_GetItem(tuple, 0);
+        PyObject* value = PyTuple_GetItem(tuple, 1);
+        asprintf(&buf, "%s\r\n%s: %s", buf, PyBytes_AsString(PyUnicode_AsUTF8String(field)), PyBytes_AsString(PyUnicode_AsUTF8String(value)));
+
+        Py_DECREF(tuple);
+        Py_DECREF(field);
+        Py_DECREF(value);
     }
-    printf("Finished loop\n");
-    asprintf(&buf, "%sContent-Length: %ld\r\n", buf, strlen(PyBytes_AS_STRING(result)));
-    asprintf(&buf, "%s\r\n%s", buf, PyBytes_AS_STRING(result));
+    asprintf(&buf, "%s\r\n\r\n%s", buf, PyBytes_AsString(result));
 
     response_buf.base = buf;
     response_buf.len = strlen(buf);
