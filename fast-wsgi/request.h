@@ -20,6 +20,8 @@ typedef struct {
 Request* new_request(client_t* client);
 void free_request(Request*);
 
+PyObject* base_dict;
+void init_request_dict();
 void build_wsgi_environ(llhttp_t* parser);
 void build_response(PyObject* wsgi_response, Response* response);
 

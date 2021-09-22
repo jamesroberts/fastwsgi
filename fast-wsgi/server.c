@@ -89,6 +89,7 @@ int main() {
 
     configure_parser_settings();
     init_constants();
+    init_request_dict();
 
     response_buf.base = SIMPLE_RESPONSE;
     response_buf.len = sizeof(SIMPLE_RESPONSE);

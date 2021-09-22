@@ -14,7 +14,7 @@ static void set_header(PyObject* headers, PyObject* key, const char* value, size
 int on_message_begin(llhttp_t* parser) {
     printf("on message begin\n");
     Request* request = (Request*)parser->data;
-    request->headers = PyDict_New();
+    request->headers = PyDict_Copy(base_dict);
     return 0;
 };
 
@@ -161,22 +161,26 @@ void build_wsgi_environ(llhttp_t* parser) {
     const char* method = llhttp_method_name(parser->method);
     PyObject* protocol = parser->http_minor == 1 ? HTTP_1_1 : HTTP_1_0;
 
-    // Find a better way to set these
-    // https://www.python.org/dev/peps/pep-3333/#specification-details
     PyObject* headers = request->headers;
     PyDict_SetItem(headers, REQUEST_METHOD, PyUnicode_FromString(method));
-    PyDict_SetItem(headers, SCRIPT_NAME, empty_string);
-    PyDict_SetItem(headers, SERVER_NAME, server_host);
-    PyDict_SetItem(headers, SERVER_PORT, server_port);
     PyDict_SetItem(headers, SERVER_PROTOCOL, protocol);
-    PyDict_SetItem(headers, wsgi_version, version);
-    PyDict_SetItem(headers, wsgi_url_scheme, http_scheme);
-    PyDict_SetItem(headers, wsgi_errors, PySys_GetObject("stderr"));
-    PyDict_SetItem(headers, wsgi_run_once, Py_False);
-    PyDict_SetItem(headers, wsgi_multithread, Py_False);
-    PyDict_SetItem(headers, wsgi_multiprocess, Py_True);
 
     Py_DECREF(protocol);
+}
+
+void init_request_dict() {
+    // Sets up base request dict for new incoming requests
+    // https://www.python.org/dev/peps/pep-3333/#specification-details
+    base_dict = PyDict_New();
+    PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
+    PyDict_SetItem(base_dict, SERVER_NAME, server_host);
+    PyDict_SetItem(base_dict, SERVER_PORT, server_port);
+    PyDict_SetItem(base_dict, wsgi_version, version);
+    PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);
+    PyDict_SetItem(base_dict, wsgi_errors, PySys_GetObject("stderr"));
+    PyDict_SetItem(base_dict, wsgi_run_once, Py_False);
+    PyDict_SetItem(base_dict, wsgi_multithread, Py_False);
+    PyDict_SetItem(base_dict, wsgi_multiprocess, Py_True);
 }
 
 void configure_parser_settings() {
