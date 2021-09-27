@@ -26,3 +26,6 @@ typedef struct {
 } client_t;
 
 PyObject* run_server(PyObject* self, PyObject* args);
+
+int LOGGING_ENABLED;
+void logger(char* message);

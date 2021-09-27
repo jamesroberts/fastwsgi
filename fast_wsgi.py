@@ -20,7 +20,7 @@ def run_multi_process_server(app):
             print(f"Worker process added with PID: {pid}")
         else:
             try:
-                _fast_wsgi.run_server(app, HOST, PORT, BACKLOG)
+                _fast_wsgi.run_server(app, HOST, PORT, BACKLOG, 1)
             except KeyboardInterrupt:
                 exit()
 
@@ -38,10 +38,7 @@ class TestMiddleware:
         self.app = app
 
     def __call__(self, environ, start_response):
-        print("Middleware!")
-        print(environ)
         response = self.app(environ, start_response)
-        print(response)
         return response
 
 
@@ -50,7 +47,6 @@ app = Flask(__name__)
 
 @app.route("/test")
 def hello_world():
-    print("Request recieved!")
     return {"message": "Hello, World!"}, 200
 
 
@@ -59,4 +55,4 @@ app = TestMiddleware(app.wsgi_app)
 if __name__ == "__main__":
     print("Starting server...")
     # run_multi_process_server(app)
-    _fast_wsgi.run_server(app, HOST, PORT, BACKLOG)
+    _fast_wsgi.run_server(app, HOST, PORT, BACKLOG, 1)

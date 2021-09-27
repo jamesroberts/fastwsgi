@@ -15,9 +15,13 @@
   "\r\n" \
   "Hello, World!\n"
 
+void logger(char* message) {
+    if (LOGGING_ENABLED)
+        printf("%s\n", message);
+}
 
 void close_cb(uv_handle_t* handle) {
-    printf("disconnected\n");
+    logger("disconnected");
     free(handle);
 }
 
@@ -33,7 +37,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     if (nread >= 0) {
         enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
         if (err == HPE_OK) {
-            printf("Successfully parsed\n");
+            logger("Successfully parsed");
             uv_write_t* req = (uv_write_t*)&client->write_req;
             uv_write(req, handle, &response_buf, 1, write_cb);
         }
@@ -51,7 +55,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    printf("Allocating buffer\n");
+    logger("Allocating buffer");
     buf->base = malloc(suggested_size);
     buf->len = suggested_size;
 }
@@ -127,7 +131,7 @@ int main() {
 }
 
 PyObject* run_server(PyObject* self, PyObject* args) {
-    PyArg_ParseTuple(args, "Osii", &wsgi_app, &host, &port, &backlog);
+    PyArg_ParseTuple(args, "Osiii", &wsgi_app, &host, &port, &backlog, &LOGGING_ENABLED);
     main();
     return Py_BuildValue("s", "'run_server' function executed");
 }
