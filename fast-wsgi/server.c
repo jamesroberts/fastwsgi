@@ -20,6 +20,12 @@ void logger(char* message) {
         printf("%s\n", message);
 }
 
+void free_write_req(uv_write_t* req) {
+    write_req_t* wr = (write_req_t*)req;
+    free(wr->buf.base);
+    free(wr);
+}
+
 void close_cb(uv_handle_t* handle) {
     logger("disconnected");
     free(handle);
@@ -29,7 +35,7 @@ void write_cb(uv_write_t* req, int status) {
     if (status) {
         fprintf(stderr, "Write error %s\n", uv_strerror(status));
     }
-    uv_close((uv_handle_t*)req->handle, close_cb);
+    free_write_req(req);
 }
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
@@ -38,14 +44,17 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
         if (err == HPE_OK) {
             logger("Successfully parsed");
-            uv_write_t* req = (uv_write_t*)&client->write_req;
-            uv_write(req, handle, &response_buf, 1, write_cb);
+            write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
+            req->buf = uv_buf_init(buf->base, nread);
+
+            uv_write((uv_write_t*)req, handle, &response_buf, 1, write_cb);
+            return;
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
         }
     }
-    else {
+    if (nread < 0) {
         if (nread != UV_EOF)
             fprintf(stderr, "Read error %s\n", uv_err_name(nread));
         uv_close((uv_handle_t*)handle, close_cb);
@@ -70,11 +79,17 @@ void connection_cb(struct uv_stream_s* handle, int status) {
 
     uv_tcp_init(loop, &client->handle);
 
+    uv_tcp_nodelay(&client->handle, 0);
+    uv_tcp_keepalive(&client->handle, 1, 60);
+
     if (uv_accept((uv_stream_t*)&server, (uv_stream_t*)&client->handle) == 0) {
         Request* request = malloc(sizeof(Request));
         llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
         client->parser.data = request;
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
+    }
+    else {
+        uv_close((uv_handle_t*)&client->handle, close_cb);
     }
 }
 
@@ -90,6 +105,9 @@ int main() {
     loop = uv_default_loop();
 
     uv_tcp_init(loop, &server);
+
+    uv_tcp_nodelay(&server, 0);
+    uv_tcp_keepalive(&server, 1, 60);
 
     configure_parser_settings();
     init_constants();

@@ -20,7 +20,7 @@ def run_multi_process_server(app):
             print(f"Worker process added with PID: {pid}")
         else:
             try:
-                _fast_wsgi.run_server(app, HOST, PORT, BACKLOG, 1)
+                _fast_wsgi.run_server(app, HOST, PORT, BACKLOG, 0)
             except KeyboardInterrupt:
                 exit()
 
