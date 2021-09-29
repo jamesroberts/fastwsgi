@@ -22,7 +22,6 @@ typedef struct {
 typedef struct {
     uv_tcp_t handle;
     llhttp_t parser;
-    write_req_t write_req;
 } client_t;
 
 PyObject* run_server(PyObject* self, PyObject* args);

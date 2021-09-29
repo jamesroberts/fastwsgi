@@ -1,7 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#include "uv.h"
+#include <uv.h>
 #include "llhttp.h"
 
 #include "server.h"
@@ -21,9 +22,7 @@ void logger(char* message) {
 }
 
 void free_write_req(uv_write_t* req) {
-    write_req_t* wr = (write_req_t*)req;
-    free(wr->buf.base);
-    free(wr);
+    free(req);
 }
 
 void close_cb(uv_handle_t* handle) {
@@ -46,9 +45,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
             logger("Successfully parsed");
             write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
             req->buf = uv_buf_init(buf->base, nread);
-
             uv_write((uv_write_t*)req, handle, &response_buf, 1, write_cb);
-            return;
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
@@ -60,16 +57,15 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         uv_close((uv_handle_t*)handle, close_cb);
     }
     free(buf->base);
-    free(client->parser.data);
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
     logger("Allocating buffer");
-    buf->base = malloc(suggested_size);
+    buf->base = (char*)malloc(suggested_size);
     buf->len = suggested_size;
 }
 
-void connection_cb(struct uv_stream_s* handle, int status) {
+void connection_cb(uv_stream_t* server, int status) {
     if (status < 0) {
         fprintf(stderr, "Connection error %s\n", uv_strerror(status));
         return;
@@ -82,7 +78,7 @@ void connection_cb(struct uv_stream_s* handle, int status) {
     uv_tcp_nodelay(&client->handle, 0);
     uv_tcp_keepalive(&client->handle, 1, 60);
 
-    if (uv_accept((uv_stream_t*)&server, (uv_stream_t*)&client->handle) == 0) {
+    if (uv_accept(server, (uv_stream_t*)&client->handle) == 0) {
         Request* request = malloc(sizeof(Request));
         llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
         client->parser.data = request;
@@ -114,7 +110,7 @@ int main() {
     init_request_dict();
 
     response_buf.base = SIMPLE_RESPONSE;
-    response_buf.len = sizeof(SIMPLE_RESPONSE);
+    response_buf.len = strlen(SIMPLE_RESPONSE);
 
     uv_ip4_addr(host, port, &addr);
 
@@ -151,5 +147,5 @@ int main() {
 PyObject* run_server(PyObject* self, PyObject* args) {
     PyArg_ParseTuple(args, "Osiii", &wsgi_app, &host, &port, &backlog, &LOGGING_ENABLED);
     main();
-    return Py_BuildValue("s", "'run_server' function executed");
+    Py_RETURN_NONE;
 }
