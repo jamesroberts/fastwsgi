@@ -57,6 +57,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         uv_close((uv_handle_t*)handle, close_cb);
     }
     free(buf->base);
+    llhttp_reset(&client->parser);
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
@@ -99,11 +100,6 @@ void signal_handler(uv_signal_t* req, int signum) {
 
 int main() {
     loop = uv_default_loop();
-
-    uv_tcp_init(loop, &server);
-
-    uv_tcp_nodelay(&server, 0);
-    uv_tcp_keepalive(&server, 1, 60);
 
     configure_parser_settings();
     init_constants();

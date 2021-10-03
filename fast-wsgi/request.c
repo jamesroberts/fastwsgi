@@ -25,6 +25,8 @@ int on_message_begin(llhttp_t* parser) {
     logger("on message begin");
     Request* request = (Request*)parser->data;
     request->headers = PyDict_Copy(base_dict);
+    Py_INCREF(request->headers);
+    Py_DECREF(request);
     return 0;
 };
 
@@ -32,6 +34,7 @@ int on_url(llhttp_t* parser, const char* url, size_t length) {
     logger("on url");
     Request* request = (Request*)parser->data;
     set_header(request->headers, "PATH_INFO", url, length);
+    Py_DECREF(request);
     return 0;
 };
 
@@ -39,6 +42,7 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
     logger("on body");
     Request* request = (Request*)parser->data;
     set_header(request->headers, "wsgi.input", body, length);
+    Py_DECREF(request);
     return 0;
 };
 
@@ -67,26 +71,18 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     logger("on header value");
     Request* request = (Request*)parser->data;
     set_header(request->headers, current_header, value, length);
+    Py_DECREF(request);
     return 0;
 };
 
 PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs) {
-    Response* res = ((StartResponse*)self)->response;
-    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &res->status, &res->headers, &res->exc_info)) {
+    StartResponse* sr = (StartResponse*)self;
+    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &sr->status, &sr->headers, &sr->exc_info)) {
         logger("something went wrong");
         return NULL;
     }
 
-    if (response->status == NULL) {
-        logger("NULL status");
-        return NULL;
-    }
-    if (response->headers == NULL) {
-        logger("NULL response_headers");
-        return NULL;
-    }
-    Py_INCREF(res->headers);
-
+    Py_INCREF(sr->headers);
     Py_RETURN_NONE;
 }
 
@@ -105,26 +101,25 @@ int on_message_complete(llhttp_t* parser) {
     Request* request = (Request*)parser->data;
     build_wsgi_environ(parser);
 
-    response = malloc(sizeof(Response));
     StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
-    start_response->response = response;
 
     logger("calling wsgi application");
     PyObject* wsgi_response = PyObject_CallFunctionObjArgs(
         wsgi_app, request->headers, start_response, NULL
     );
     logger("called wsgi application");
-    build_response(wsgi_response, response);
+    build_response(wsgi_response, start_response);
 
+    Py_DECREF(request);
     Py_DECREF(start_response);
     Py_DECREF(wsgi_response);
 
-    free(response);
-
+    Py_CLEAR(start_response->headers);
+    Py_CLEAR(request->headers);
     return 0;
 };
 
-void build_response(PyObject* wsgi_response, Response* response) {
+void build_response(PyObject* wsgi_response, StartResponse* response) {
     logger("building response");
     PyObject* iter = PyObject_GetIter(wsgi_response);
     PyObject* result = PyIter_Next(iter);
@@ -134,15 +129,28 @@ void build_response(PyObject* wsgi_response, Response* response) {
 
     for (Py_ssize_t i = 0; i < PyList_Size(response->headers); ++i) {
         PyObject* tuple = PyList_GetItem(response->headers, i);
-        PyObject* field = PyTuple_GetItem(tuple, 0);
-        PyObject* value = PyTuple_GetItem(tuple, 1);
-        asprintf(&buf, "%s\r\n%s: %s", buf, PyBytes_AsString(PyUnicode_AsUTF8String(field)), PyBytes_AsString(PyUnicode_AsUTF8String(value)));
+        PyObject* field = PyUnicode_AsUTF8String(PyTuple_GetItem(tuple, 0));
+        PyObject* value = PyUnicode_AsUTF8String(PyTuple_GetItem(tuple, 1));
+
+        Py_DECREF(tuple);
+        Py_DECREF(field);
+        Py_DECREF(value);
+
+        asprintf(&buf, "%s\r\n%s: %s", buf, PyBytes_AsString(field), PyBytes_AsString(value));
         logger("added header");
     }
     asprintf(&buf, "%s\r\n\r\n%s", buf, PyBytes_AsString(result));
 
     response_buf.base = buf;
     response_buf.len = strlen(buf);
+
+    PyObject* close = PyObject_GetAttrString(iter, "close");
+    if (close != NULL)
+        PyObject_CallObject(close, NULL);
+
+    Py_DECREF(close);
+    Py_DECREF(iter);
+    Py_DECREF(result);
 }
 
 
@@ -151,12 +159,12 @@ void build_wsgi_environ(llhttp_t* parser) {
     Request* request = (Request*)parser->data;
 
     const char* method = llhttp_method_name(parser->method);
-    PyObject* protocol = parser->http_minor == 1 ? HTTP_1_1 : HTTP_1_0;
+    const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
 
-    PyDict_SetItem(request->headers, REQUEST_METHOD, PyUnicode_FromString(method));
-    PyDict_SetItem(request->headers, SERVER_PROTOCOL, protocol);
+    set_header(request->headers, "REQUEST_METHOD", method, strlen(method));
+    set_header(request->headers, "SERVER_PROTOCOL", protocol, strlen(protocol));
 
-    Py_DECREF(protocol);
+    Py_DECREF(request);
 }
 
 void init_request_dict() {
