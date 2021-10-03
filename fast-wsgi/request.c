@@ -8,17 +8,16 @@ static void reprint(PyObject* obj) {
     PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
     const char* bytes = PyBytes_AS_STRING(str);
 
-    printf("REPR: %s", bytes);
+    printf("REPR: %s\n", bytes);
 
     Py_XDECREF(repr);
     Py_XDECREF(str);
 }
 
-static void set_header(PyObject* headers, PyObject* key, const char* value, size_t length) {
+static void set_header(PyObject* headers, const char* key, const char* value, size_t length) {
     logger("setting header");
     PyObject* item = PyUnicode_FromStringAndSize(value, length);
-    PyDict_SetItem(headers, key, item);
-    Py_DECREF(key);
+    PyDict_SetItemString(headers, key, item);
     Py_DECREF(item);
 }
 
@@ -32,43 +31,35 @@ int on_message_begin(llhttp_t* parser) {
 int on_url(llhttp_t* parser, const char* url, size_t length) {
     logger("on url");
     Request* request = (Request*)parser->data;
-    PyObject* header = Py_BuildValue("s", "PATH_INFO");
-
-    Py_INCREF(header);
-    set_header(request->headers, header, url, length);
-    Py_DECREF(header);
+    set_header(request->headers, "PATH_INFO", url, length);
     return 0;
 };
 
 int on_body(llhttp_t* parser, const char* body, size_t length) {
     logger("on body");
     Request* request = (Request*)parser->data;
-    Py_INCREF(wsgi_input);
-    set_header(request->headers, wsgi_input, body, length);
-    Py_DECREF(wsgi_input);
+    set_header(request->headers, "wsgi.input", body, length);
     return 0;
 };
 
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     logger("on header field");
 
-    char upperHeader[length];
+    char upperHeader[length + 1];
     for (size_t i = 0; i < length; i++) {
         char current = header[i];
         if (current == '-') {
             upperHeader[i] = '_';
         }
+        else if (current >= 'a' && current <= 'z') {
+            upperHeader[i] = current - ('a' - 'A');
+        }
         else {
-            upperHeader[i] = toupper(current);
+            upperHeader[i] = current;
         }
     }
-    PyObject* uppercaseHeader = PyUnicode_FromStringAndSize(upperHeader, length);
-
-    Py_INCREF(HTTP_);
-    current_header = PyUnicode_Concat(HTTP_, uppercaseHeader);
-    Py_INCREF(current_header);
-    Py_DECREF(uppercaseHeader);
-    Py_DECREF(HTTP_);
+    upperHeader[length] = 0;
+    asprintf(&current_header, "HTTP_%s", upperHeader);
     return 0;
 };
 
@@ -76,14 +67,12 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     logger("on header value");
     Request* request = (Request*)parser->data;
     set_header(request->headers, current_header, value, length);
-    Py_DECREF(current_header);
     return 0;
 };
 
 PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs) {
     Response* res = ((StartResponse*)self)->response;
-    PyObject* exc_info = NULL;
-    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &res->status, &res->headers, &exc_info)) {
+    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &res->status, &res->headers, &res->exc_info)) {
         logger("something went wrong");
         return NULL;
     }
@@ -129,6 +118,9 @@ int on_message_complete(llhttp_t* parser) {
 
     Py_DECREF(start_response);
     Py_DECREF(wsgi_response);
+
+    free(response);
+
     return 0;
 };
 
@@ -145,10 +137,6 @@ void build_response(PyObject* wsgi_response, Response* response) {
         PyObject* field = PyTuple_GetItem(tuple, 0);
         PyObject* value = PyTuple_GetItem(tuple, 1);
         asprintf(&buf, "%s\r\n%s: %s", buf, PyBytes_AsString(PyUnicode_AsUTF8String(field)), PyBytes_AsString(PyUnicode_AsUTF8String(value)));
-
-        Py_DECREF(tuple);
-        Py_DECREF(field);
-        Py_DECREF(value);
         logger("added header");
     }
     asprintf(&buf, "%s\r\n\r\n%s", buf, PyBytes_AsString(result));
@@ -161,12 +149,12 @@ void build_response(PyObject* wsgi_response, Response* response) {
 void build_wsgi_environ(llhttp_t* parser) {
     logger("building wsgi environ");
     Request* request = (Request*)parser->data;
+
     const char* method = llhttp_method_name(parser->method);
     PyObject* protocol = parser->http_minor == 1 ? HTTP_1_1 : HTTP_1_0;
 
-    PyObject* headers = request->headers;
-    PyDict_SetItem(headers, REQUEST_METHOD, PyUnicode_FromString(method));
-    PyDict_SetItem(headers, SERVER_PROTOCOL, protocol);
+    PyDict_SetItem(request->headers, REQUEST_METHOD, PyUnicode_FromString(method));
+    PyDict_SetItem(request->headers, SERVER_PROTOCOL, protocol);
 
     Py_DECREF(protocol);
 }

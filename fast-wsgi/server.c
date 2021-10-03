@@ -138,7 +138,6 @@ int main() {
     uv_signal_start(&signal, signal_handler, SIGINT);
 
     uv_run(loop, UV_RUN_DEFAULT);
-
     uv_loop_close(loop);
     free(loop);
     return 0;

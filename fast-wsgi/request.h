@@ -6,6 +6,7 @@ typedef struct {
     PyObject_HEAD;
     PyObject* headers;
     PyObject* status;
+    PyObject* exc_info;
     PyObject* body;
 } Response;
 
@@ -25,9 +26,7 @@ void init_request_dict();
 void build_wsgi_environ(llhttp_t* parser);
 void build_response(PyObject* wsgi_response, Response* response);
 
-PyObject* current_header;
-PyObject* response_headers;
-
+char* current_header;
 Response* response;
 
 llhttp_settings_t parser_settings;
