@@ -1,5 +1,4 @@
 typedef struct {
-    PyObject_HEAD;
     PyObject* headers;
 } Request;
 
