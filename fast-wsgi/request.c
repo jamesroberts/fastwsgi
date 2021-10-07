@@ -138,11 +138,12 @@ void build_response(PyObject* wsgi_response, StartResponse* response) {
         PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
         PyObject* value = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 1));
 
+        asprintf(&buf, "%s\r\n%s: %s", buf, PyBytes_AsString(field), PyBytes_AsString(value));
+
         Py_DECREF(tuple);
         Py_DECREF(field);
         Py_DECREF(value);
 
-        asprintf(&buf, "%s\r\n%s: %s", buf, PyBytes_AsString(field), PyBytes_AsString(value));
         logger("added header");
 
         PySequence_DelItem(response->headers, 0);
