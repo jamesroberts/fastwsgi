@@ -25,7 +25,6 @@ int on_message_begin(llhttp_t* parser) {
     logger("on message begin");
     Request* request = (Request*)parser->data;
     request->headers = PyDict_Copy(base_dict);
-    Py_INCREF(request->headers);
     return 0;
 };
 
@@ -60,7 +59,11 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
         }
     }
     upperHeader[length] = 0;
+    char* old_header = current_header;
     asprintf(&current_header, "HTTP_%s", upperHeader);
+    if (old_header)
+        free(old_header);
+
     return 0;
 };
 
@@ -109,6 +112,7 @@ int on_message_complete(llhttp_t* parser) {
     logger("called wsgi application");
     build_response(wsgi_response, start_response);
 
+    PyDict_Clear(start_response->headers);
     Py_CLEAR(start_response->headers);
     Py_CLEAR(start_response->status);
     Py_CLEAR(start_response->exc_info);
@@ -127,10 +131,9 @@ void build_response(PyObject* wsgi_response, StartResponse* response) {
     PyObject* iter = PyObject_GetIter(wsgi_response);
     PyObject* result = PyIter_Next(iter);
 
-
-    char* buf = "HTTP/1.1";
+    char* buf = NULL;
     PyObject* status = PyUnicode_AsUTF8String(response->status);
-    asprintf(&buf, "%s %s", buf, PyBytes_AsString(status));
+    asprintf(&buf, "HTTP/1.1 %s", PyBytes_AsString(status));
     Py_DECREF(status);
 
     while (PyList_Size(response->headers) > 0) {
@@ -138,7 +141,12 @@ void build_response(PyObject* wsgi_response, StartResponse* response) {
         PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
         PyObject* value = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 1));
 
-        asprintf(&buf, "%s\r\n%s: %s", buf, PyBytes_AsString(field), PyBytes_AsString(value));
+        char* header_field = PyBytes_AsString(field);
+        char* header_value = PyBytes_AsString(value);
+
+        char* old_buf = buf;
+        asprintf(&buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
+        free(old_buf);
 
         Py_DECREF(tuple);
         Py_DECREF(field);
@@ -148,8 +156,11 @@ void build_response(PyObject* wsgi_response, StartResponse* response) {
 
         PySequence_DelItem(response->headers, 0);
     }
+    char* response_body = PyBytes_AsString(result);
 
-    asprintf(&buf, "%s\r\n\r\n%s", buf, PyBytes_AsString(result));
+    char* old_buf = buf;
+    asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
+    free(old_buf);
 
     response_buf.base = buf;
     response_buf.len = strlen(buf);
