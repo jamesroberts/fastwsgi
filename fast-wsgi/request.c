@@ -110,23 +110,22 @@ int on_message_complete(llhttp_t* parser) {
         wsgi_app, request->headers, start_response, NULL
     );
     logger("called wsgi application");
-    build_response(wsgi_response, start_response);
 
-    PyDict_Clear(start_response->headers);
+    int should_keep_alive = llhttp_should_keep_alive(parser);
+    build_response(wsgi_response, start_response, should_keep_alive);
+
     Py_CLEAR(start_response->headers);
     Py_CLEAR(start_response->status);
     Py_CLEAR(start_response->exc_info);
     Py_CLEAR(start_response);
 
     Py_CLEAR(wsgi_response);
-
-    PyDict_Clear(request->headers);
     Py_CLEAR(request->headers);
 
     return 0;
 };
 
-void build_response(PyObject* wsgi_response, StartResponse* response) {
+void build_response(PyObject* wsgi_response, StartResponse* response, int should_keep_alive) {
     logger("building response");
     PyObject* iter = PyObject_GetIter(wsgi_response);
     PyObject* result = PyIter_Next(iter);
@@ -136,13 +135,20 @@ void build_response(PyObject* wsgi_response, StartResponse* response) {
     asprintf(&buf, "HTTP/1.1 %s", PyBytes_AsString(status));
     Py_DECREF(status);
 
+    char* connection_header = "\r\nConnection: close";
+    if (should_keep_alive) connection_header = "\r\nConnection: Keep-Alive";
+
+    char* old_buf = buf;
+    asprintf(&buf, "%s%s", old_buf, connection_header);
+    free(old_buf);
+
     while (PyList_Size(response->headers) > 0) {
         PyObject* tuple = PyList_GET_ITEM(response->headers, 0);
         PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
         PyObject* value = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 1));
 
-        char* header_field = PyBytes_AsString(field);
-        char* header_value = PyBytes_AsString(value);
+        char* header_field = PyBytes_AS_STRING(field);
+        char* header_value = PyBytes_AS_STRING(value);
 
         char* old_buf = buf;
         asprintf(&buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
@@ -158,7 +164,7 @@ void build_response(PyObject* wsgi_response, StartResponse* response) {
     }
     char* response_body = PyBytes_AsString(result);
 
-    char* old_buf = buf;
+    old_buf = buf;
     asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
     free(old_buf);
 

@@ -12,7 +12,7 @@ typedef struct {
 PyObject* base_dict;
 void init_request_dict();
 void build_wsgi_environ(llhttp_t* parser);
-void build_response(PyObject* wsgi_response, StartResponse* response);
+void build_response(PyObject* wsgi_response, StartResponse* response, int should_keep_alive);
 
 char* current_header;
 
