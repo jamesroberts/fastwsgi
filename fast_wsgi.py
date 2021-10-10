@@ -2,7 +2,7 @@ import os
 import signal
 import _fast_wsgi
 
-from flask import Flask
+from flask import Flask, request
 
 NUM_WORKERS = 4
 HOST = "0.0.0.0"
@@ -45,8 +45,11 @@ class TestMiddleware:
 app = Flask(__name__)
 
 
-@app.route("/test")
+@app.route("/test", methods=["GET", "POST"])
 def hello_world():
+    if request.method == "POST":
+        return {"message": request.get_json()}, 201
+
     return {"message": "Hello, World!"}, 200
 
 

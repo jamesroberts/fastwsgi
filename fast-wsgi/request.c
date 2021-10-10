@@ -38,7 +38,20 @@ int on_url(llhttp_t* parser, const char* url, size_t length) {
 int on_body(llhttp_t* parser, const char* body, size_t length) {
     logger("on body");
     Request* request = (Request*)parser->data;
-    set_header(request->headers, "wsgi.input", body, length);
+
+    PyObject* input = PyDict_GetItem(request->headers, wsgi_input);
+
+    PyObject* write = PyUnicode_FromString("write");
+    PyObject* body_content = PyBytes_FromStringAndSize(body, length);
+    PyObject* result = PyObject_CallMethodObjArgs(input, write, body_content, NULL);
+    Py_DECREF(write);
+    Py_XDECREF(result);
+    Py_XDECREF(body_content);
+
+    PyObject* seek = PyUnicode_FromString("seek");
+    PyObject* res = PyObject_CallMethodObjArgs(input, seek, PyLong_FromLong(0L), NULL);
+    Py_DECREF(seek);
+    Py_XDECREF(res);
     return 0;
 };
 
@@ -60,7 +73,14 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     }
     upperHeader[length] = 0;
     char* old_header = current_header;
-    asprintf(&current_header, "HTTP_%s", upperHeader);
+
+    if ((strcmp(upperHeader, "CONTENT_LENGTH") == 0) || (strcmp(upperHeader, "CONTENT_TYPE") == 0)) {
+        asprintf(&current_header, "%s", upperHeader);
+    }
+    else {
+        asprintf(&current_header, "HTTP_%s", upperHeader);
+    }
+
     if (old_header)
         free(old_header);
 
@@ -197,10 +217,15 @@ void build_wsgi_environ(llhttp_t* parser) {
 void init_request_dict() {
     // Sets up base request dict for new incoming requests
     // https://www.python.org/dev/peps/pep-3333/#specification-details
+    PyObject* io = PyImport_ImportModule("io");
+    PyObject* BytesIO = PyUnicode_FromString("BytesIO");
+    PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
+
     base_dict = PyDict_New();
     PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
     PyDict_SetItem(base_dict, SERVER_NAME, server_host);
     PyDict_SetItem(base_dict, SERVER_PORT, server_port);
+    PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);
     PyDict_SetItem(base_dict, wsgi_version, version);
     PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);
     PyDict_SetItem(base_dict, wsgi_errors, PySys_GetObject("stderr"));
