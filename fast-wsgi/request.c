@@ -28,10 +28,21 @@ int on_message_begin(llhttp_t* parser) {
     return 0;
 };
 
-int on_url(llhttp_t* parser, const char* url, size_t length) {
+int on_url(llhttp_t* parser, const char* data, size_t length) {
     logger("on url");
     Request* request = (Request*)parser->data;
-    set_header(request->headers, "PATH_INFO", url, length);
+
+    char url[length + 1];
+    strncpy(url, data, length);
+    url[length] = 0;
+
+    char* path = strtok(url, "?");
+    set_header(request->headers, "PATH_INFO", path, strlen(path));
+
+    char* query_string = strtok(NULL, "");
+    if (query_string) {
+        set_header(request->headers, "QUERY_STRING", query_string, strlen(query_string));
+    }
     return 0;
 };
 
@@ -209,9 +220,11 @@ void build_wsgi_environ(llhttp_t* parser) {
 
     const char* method = llhttp_method_name(parser->method);
     const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
+    const char* remote_addr = inet_ntoa(addr.sin_addr);
 
     set_header(request->headers, "REQUEST_METHOD", method, strlen(method));
     set_header(request->headers, "SERVER_PROTOCOL", protocol, strlen(protocol));
+    set_header(request->headers, "REMOTE_ADDR", remote_addr, strlen(remote_addr));
 }
 
 void init_request_dict() {
