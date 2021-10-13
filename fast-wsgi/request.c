@@ -17,7 +17,21 @@ static void reprint(PyObject* obj) {
 static void set_header(PyObject* headers, const char* key, const char* value, size_t length) {
     logger("setting header");
     PyObject* item = PyUnicode_FromStringAndSize(value, length);
-    PyDict_SetItemString(headers, key, item);
+
+    PyObject* existing_item = PyDict_GetItemString(headers, key);
+    if (existing_item) {
+        PyObject* comma = PyUnicode_FromString(",");
+        PyObject* value_list = Py_BuildValue("[SS]", existing_item, item);
+        PyObject* updated_item = PyUnicode_Join(comma, value_list);
+
+        PyDict_SetItemString(headers, key, updated_item);
+        Py_DECREF(updated_item);
+        Py_DECREF(value_list);
+        Py_DECREF(comma);
+    }
+    else {
+        PyDict_SetItemString(headers, key, item);
+    }
     Py_DECREF(item);
 }
 

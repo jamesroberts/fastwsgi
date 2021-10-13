@@ -8,7 +8,8 @@ module = Extension(
     "_fast_wsgi",
     sources=SOURCE_FILES,
     libraries=['uv'],
-    include_dirs=["llhttp/include", "/usr/include"],
+    include_dirs=["llhttp/include"],
+    extra_compile_args=["-O3", "-fno-strict-aliasing"]
 )
 
 setup(
