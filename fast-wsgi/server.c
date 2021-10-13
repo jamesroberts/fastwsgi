@@ -21,10 +21,6 @@ void logger(char* message) {
         printf("%s\n", message);
 }
 
-void free_write_req(uv_write_t* req) {
-    free(req);
-}
-
 void close_cb(uv_handle_t* handle) {
     logger("disconnected");
     free(handle);
@@ -34,7 +30,7 @@ void write_cb(uv_write_t* req, int status) {
     if (status) {
         fprintf(stderr, "Write error %s\n", uv_strerror(status));
     }
-    free_write_req(req);
+    free(req);
 }
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {

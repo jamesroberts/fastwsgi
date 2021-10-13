@@ -171,13 +171,18 @@ int on_message_complete(llhttp_t* parser) {
 };
 
 void build_response(PyObject* wsgi_response, StartResponse* response, int should_keep_alive) {
+    // There is a tiny memory leak somewhere in this function...
     logger("building response");
-    PyObject* iter = PyObject_GetIter(wsgi_response);
+    PyObject* iter;
+
+    if (PyIter_Check(wsgi_response)) iter = wsgi_response;
+    else iter = PyObject_GetIter(wsgi_response);
+
     PyObject* result = PyIter_Next(iter);
 
-    char* buf = NULL;
+    char* buf;
     PyObject* status = PyUnicode_AsUTF8String(response->status);
-    asprintf(&buf, "HTTP/1.1 %s", PyBytes_AsString(status));
+    asprintf(&buf, "HTTP/1.1 %s", PyBytes_AS_STRING(status));
     Py_DECREF(status);
 
     char* connection_header = "\r\nConnection: close";
@@ -187,8 +192,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, int should
     asprintf(&buf, "%s%s", old_buf, connection_header);
     free(old_buf);
 
-    while (PyList_Size(response->headers) > 0) {
-        PyObject* tuple = PyList_GET_ITEM(response->headers, 0);
+    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); i++) {
+        PyObject* tuple = PyList_GET_ITEM(response->headers, i);
         PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
         PyObject* value = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 1));
 
@@ -199,15 +204,12 @@ void build_response(PyObject* wsgi_response, StartResponse* response, int should
         asprintf(&buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
         free(old_buf);
 
-        Py_DECREF(tuple);
         Py_DECREF(field);
         Py_DECREF(value);
 
         logger("added header");
-
-        PySequence_DelItem(response->headers, 0);
     }
-    char* response_body = PyBytes_AsString(result);
+    char* response_body = PyBytes_AS_STRING(result);
 
     old_buf = buf;
     asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
@@ -221,10 +223,10 @@ void build_response(PyObject* wsgi_response, StartResponse* response, int should
         PyObject* close_result = PyObject_CallObject(close, NULL);
         Py_XDECREF(close_result);
     }
-
     Py_DECREF(close);
     Py_DECREF(iter);
     Py_XDECREF(result);
+    result = NULL;
 }
 
 
