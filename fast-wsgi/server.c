@@ -75,8 +75,13 @@ void connection_cb(uv_stream_t* server, int status) {
     uv_tcp_nodelay(&client->handle, 0);
     uv_tcp_keepalive(&client->handle, 1, 60);
 
+    int namelen;
+    struct sockaddr_in socket;
+
     if (uv_accept(server, (uv_stream_t*)&client->handle) == 0) {
         Request* request = malloc(sizeof(Request));
+        uv_tcp_getsockname((uv_tcp_t*)&client->handle, (struct sockaddr*)&socket, &namelen);
+        request->remote_addr = inet_ntoa(socket.sin_addr);
         llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
         client->parser.data = request;
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);

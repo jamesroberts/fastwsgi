@@ -236,7 +236,7 @@ void build_wsgi_environ(llhttp_t* parser) {
 
     const char* method = llhttp_method_name(parser->method);
     const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
-    const char* remote_addr = inet_ntoa(addr.sin_addr);
+    const char* remote_addr = request->remote_addr;
 
     set_header(request->headers, "REQUEST_METHOD", method, strlen(method));
     set_header(request->headers, "SERVER_PROTOCOL", protocol, strlen(protocol));

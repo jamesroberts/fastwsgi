@@ -1,5 +1,6 @@
 typedef struct {
     PyObject* headers;
+    char* remote_addr;
 } Request;
 
 typedef struct {
