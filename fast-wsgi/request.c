@@ -156,8 +156,7 @@ int on_message_complete(llhttp_t* parser) {
     );
     logger("called wsgi application");
 
-    int should_keep_alive = llhttp_should_keep_alive(parser);
-    build_response(wsgi_response, start_response, should_keep_alive);
+    build_response(wsgi_response, start_response, parser);
 
     Py_CLEAR(start_response->headers);
     Py_CLEAR(start_response->status);
@@ -170,7 +169,7 @@ int on_message_complete(llhttp_t* parser) {
     return 0;
 };
 
-void build_response(PyObject* wsgi_response, StartResponse* response, int should_keep_alive) {
+void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* parser) {
     // There is a tiny memory leak somewhere in this function...
     logger("building response");
     PyObject* iter;
@@ -186,7 +185,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, int should
     Py_DECREF(status);
 
     char* connection_header = "\r\nConnection: close";
-    if (should_keep_alive) connection_header = "\r\nConnection: Keep-Alive";
+    if (llhttp_should_keep_alive(parser))
+        connection_header = "\r\nConnection: Keep-Alive";
 
     char* old_buf = buf;
     asprintf(&buf, "%s%s", old_buf, connection_header);
@@ -215,8 +215,10 @@ void build_response(PyObject* wsgi_response, StartResponse* response, int should
     asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
     free(old_buf);
 
-    response_buf.base = buf;
-    response_buf.len = strlen(buf);
+    Request* request = (Request*)parser->data;
+
+    request->response_buffer.base = buf;
+    request->response_buffer.len = strlen(buf);
 
     PyObject* close = PyObject_GetAttrString(iter, "close");
     if (close != NULL) {

@@ -33,27 +33,13 @@ def run_multi_process_server(app):
             os.kill(worker, signal.SIGINT)
 
 
-class TestMiddleware:
-    def __init__(self, app):
-        self.app = app
-
-    def __call__(self, environ, start_response):
-        response = self.app(environ, start_response)
-        return response
-
-
 app = Flask(__name__)
 
 
-@app.route("/test", methods=["GET", "POST"])
+@app.route("/test")
 def hello_world():
-    if request.method == "POST":
-        return {"message": request.get_json()}, 201
-
     return {"message": "Hello, World!"}, 200
 
-
-app = TestMiddleware(app.wsgi_app)
 
 if __name__ == "__main__":
     print("Starting server...")

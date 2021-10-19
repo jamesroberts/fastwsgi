@@ -9,13 +9,6 @@
 #include "request.h"
 #include "constants.h"
 
-#define SIMPLE_RESPONSE \
-  "HTTP/1.1 200 OK\r\n" \
-  "Content-Type: text/plain\r\n" \
-  "Content-Length: 14\r\n" \
-  "\r\n" \
-  "Hello, World!\n"
-
 void logger(char* message) {
     if (LOGGING_ENABLED)
         printf("%s\n", message);
@@ -34,24 +27,37 @@ void write_cb(uv_write_t* req, int status) {
 }
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
-    client_t* client = (client_t*)handle;
+    client_t* client = (client_t*)handle->data;
+
+    struct sockaddr sockname;
+    struct sockaddr_in* addr = (struct sockaddr_in*)&sockname;
+    int socklen = sizeof(sockname);
+
+    Request* request = malloc(sizeof(Request));
+    uv_tcp_getsockname((uv_tcp_t*)handle, &sockname, &socklen);
+    uv_ip4_name(addr, request->remote_addr, sizeof(request->remote_addr));
+
+    llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
+    client->parser.data = request;
+
     if (nread >= 0) {
         enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
         if (err == HPE_OK) {
             logger("Successfully parsed");
             write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
             req->buf = uv_buf_init(buf->base, nread);
-            uv_write((uv_write_t*)req, handle, &response_buf, 1, write_cb);
+            uv_write((uv_write_t*)req, handle, &request->response_buffer, 1, write_cb);
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
         }
     }
-    if (nread < 0) {
+    else {
         if (nread != UV_EOF)
             fprintf(stderr, "Read error %s\n", uv_err_name(nread));
         uv_close((uv_handle_t*)handle, close_cb);
     }
+    free(request);
     free(buf->base);
     llhttp_reset(&client->parser);
 }
@@ -71,19 +77,12 @@ void connection_cb(uv_stream_t* server, int status) {
     client_t* client = malloc(sizeof(client_t));
 
     uv_tcp_init(loop, &client->handle);
-
     uv_tcp_nodelay(&client->handle, 0);
     uv_tcp_keepalive(&client->handle, 1, 60);
 
-    int namelen;
-    struct sockaddr_in socket;
+    client->handle.data = client;
 
     if (uv_accept(server, (uv_stream_t*)&client->handle) == 0) {
-        Request* request = malloc(sizeof(Request));
-        uv_tcp_getsockname((uv_tcp_t*)&client->handle, (struct sockaddr*)&socket, &namelen);
-        request->remote_addr = inet_ntoa(socket.sin_addr);
-        llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
-        client->parser.data = request;
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
     }
     else {
@@ -106,9 +105,6 @@ int main() {
     init_constants();
     init_request_dict();
 
-    response_buf.base = SIMPLE_RESPONSE;
-    response_buf.len = strlen(SIMPLE_RESPONSE);
-
     uv_ip4_addr(host, port, &addr);
 
     uv_tcp_init_ex(loop, &server, AF_INET);
@@ -118,15 +114,15 @@ int main() {
     int enabled = 1;
     setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof(&enabled));
 
-    int r = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
-    if (r) {
-        fprintf(stderr, "Bind error %s\n", uv_strerror(r));
+    int err = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
+    if (err) {
+        fprintf(stderr, "Bind error %s\n", uv_strerror(err));
         return 1;
     }
 
-    r = uv_listen((uv_stream_t*)&server, backlog, connection_cb);
-    if (r) {
-        fprintf(stderr, "Listen error %s\n", uv_strerror(r));
+    err = uv_listen((uv_stream_t*)&server, backlog, connection_cb);
+    if (err) {
+        fprintf(stderr, "Listen error %s\n", uv_strerror(err));
         return 1;
     }
 
