@@ -36,7 +36,7 @@ def run_multi_process_server(app):
 app = Flask(__name__)
 
 
-@app.route("/test")
+@app.route("/test", methods=["GET"])
 def hello_world():
     return {"message": "Hello, World!"}, 200
 
