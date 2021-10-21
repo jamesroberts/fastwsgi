@@ -2,7 +2,6 @@ import os
 import signal
 import _fast_wsgi
 
-from flask import Flask, request
 
 NUM_WORKERS = 4
 HOST = "0.0.0.0"
@@ -33,15 +32,8 @@ def run_multi_process_server(app):
             os.kill(worker, signal.SIGINT)
 
 
-app = Flask(__name__)
-
-
-@app.route("/test", methods=["GET"])
-def hello_world():
-    return {"message": "Hello, World!"}, 200
-
-
-if __name__ == "__main__":
+def run(wsgi_app, host, port, backlog=1024):
     print("Starting server...")
+    enable_logging = 0
+    _fast_wsgi.run_server(wsgi_app, host, port, backlog, enable_logging)
     # run_multi_process_server(app)
-    _fast_wsgi.run_server(app, HOST, PORT, BACKLOG, 1)

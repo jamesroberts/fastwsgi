@@ -225,8 +225,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
         PyObject* close_result = PyObject_CallObject(close, NULL);
         Py_XDECREF(close_result);
     }
-    Py_DECREF(close);
-    Py_DECREF(iter);
+    Py_XDECREF(iter);
+    Py_XDECREF(close);
     Py_XDECREF(result);
     result = NULL;
 }

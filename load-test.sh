@@ -1,1 +1,1 @@
-wrk -t8 -c100 -d15 http://localhost:5000/test
+wrk -t8 -c100 -d15 http://localhost:5000

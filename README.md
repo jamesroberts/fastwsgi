@@ -2,18 +2,36 @@
 [![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/jamesroberts/fast-wsgi.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/jamesroberts/fast-wsgi/context:python)
 
 # Fast WSGI
+#### Note: Fast WSGI is still under development...
 
 Fast WSGI is an ultra fast WSGI server for Python 3. 
 
 It is mostly written in C. It makes use of [libuv](https://github.com/libuv/libuv) and [llhttp](https://github.com/nodejs/llhttp) under the hood for blazing fast performance. 
 
-** Fast WSGI is still under development...
+
+
+## Example usage with Flask
+
+```python
+import fast_wsgi
+from flask import Flask
+
+app = Flask(__name__)
+
+
+@app.get("/")
+def hello_world():
+    return "Hello, World!", 200
+
+
+if __name__ == "__main__":
+    fast_wsgi.run(wsgi_app=app, host="0.0.0.0", port=5000)
+```
 
 ## TODO
 
-- Memory lifecycle management
-- Python object ref count tracking
-- WSGI app invoking
-- Test integration with flask app
-- Basic error handling
-
+- Test integration with other frameworks (uWSGI, Django, etc)
+- Comprehensive error handling
+- Complete HTTP/1.1 compliance
+- Test on multiple platforms (Windows/MacOS)
+- Unit Tests
