@@ -12,7 +12,7 @@ It is mostly written in C. It makes use of [libuv](https://github.com/libuv/libu
 
 ## Example usage with Flask
 
-See [example.py](https://github.com/jamesroberts/fast-wsgi/blob/main/testapp.py) for more details.
+See [example.py](https://github.com/jamesroberts/fast-wsgi/blob/main/example.py) for more details.
 
 ```python
 import fast_wsgi
