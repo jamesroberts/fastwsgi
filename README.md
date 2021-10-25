@@ -30,6 +30,19 @@ if __name__ == "__main__":
     fast_wsgi.run(wsgi_app=app, host="0.0.0.0", port=5000)
 ```
 
+
+## Example usage with uWSGI
+
+```python
+def application(environ, start_response):
+    start_response('200 OK', [('Content-Type', 'text/html')])
+    return [b"Hello, World!"]
+
+if __name__ == "__main__":
+    fast_wsgi.run(wsgi_app=application, host="0.0.0.0", port=5000)
+```
+
+
 ## TODO
 
 - Test integration with other frameworks (uWSGI, Django, etc)
@@ -37,3 +50,4 @@ if __name__ == "__main__":
 - Complete HTTP/1.1 compliance
 - Test on multiple platforms (Windows/MacOS)
 - Unit Tests
+- CI/CD
