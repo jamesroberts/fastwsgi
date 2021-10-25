@@ -192,6 +192,7 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     asprintf(&buf, "%s%s", old_buf, connection_header);
     free(old_buf);
 
+    int content_length_header_present = 0;
     for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); i++) {
         PyObject* tuple = PyList_GET_ITEM(response->headers, i);
         PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
@@ -199,6 +200,10 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
         char* header_field = PyBytes_AS_STRING(field);
         char* header_value = PyBytes_AS_STRING(value);
+
+        if (strcasecmp("Content-Length", header_field) == 0) {
+            content_length_header_present = 1;
+        }
 
         char* old_buf = buf;
         asprintf(&buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
@@ -210,6 +215,12 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
         logger("added header");
     }
     char* response_body = PyBytes_AS_STRING(result);
+
+    if (content_length_header_present == 0) {
+        char* old_buf = buf;
+        asprintf(&buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body));
+        free(old_buf);
+    }
 
     old_buf = buf;
     asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
