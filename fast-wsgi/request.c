@@ -220,13 +220,15 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     request->response_buffer.base = buf;
     request->response_buffer.len = strlen(buf);
 
-    PyObject* close = PyObject_GetAttrString(iter, "close");
-    if (close != NULL) {
-        PyObject* close_result = PyObject_CallObject(close, NULL);
-        Py_XDECREF(close_result);
+    if (PyObject_HasAttrString(iter, "close")) {
+        PyObject* close = PyObject_GetAttrString(iter, "close");
+        if (close != NULL) {
+            PyObject* close_result = PyObject_CallObject(close, NULL);
+            Py_XDECREF(close_result);
+        }
+        Py_XDECREF(close);
     }
     Py_XDECREF(iter);
-    Py_XDECREF(close);
     Py_XDECREF(result);
     result = NULL;
 }
