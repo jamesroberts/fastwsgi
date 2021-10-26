@@ -27,7 +27,7 @@ def hello_world():
 
 
 if __name__ == "__main__":
-    fastwsgi.run(wsgi_app=app, host="0.0.0.0", port=5000)
+    fastwsgi.run(wsgi_app=app, host="127.0.0.1", port=5000)
 ```
 
 
@@ -39,9 +39,16 @@ def application(environ, start_response):
     return [b"Hello, World!"]
 
 if __name__ == "__main__":
-    fastwsgi.run(wsgi_app=application, host="0.0.0.0", port=5000)
+    fastwsgi.run(wsgi_app=application, host="127.0.0.1", port=5000)
 ```
 
+## Testing
+
+To run the test suite using [pytest](https://docs.pytest.org/en/latest/getting-started.html), run the following command:
+
+```bash
+python3 -m pytest
+```
 
 ## TODO
 
