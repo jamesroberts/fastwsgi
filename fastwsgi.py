@@ -1,6 +1,6 @@
 import os
 import signal
-import _fast_wsgi
+import _fastwsgi
 
 
 NUM_WORKERS = 4
@@ -19,7 +19,7 @@ def run_multi_process_server(app):
             print(f"Worker process added with PID: {pid}")
         else:
             try:
-                _fast_wsgi.run_server(app, HOST, PORT, BACKLOG, 0)
+                _fastwsgi.run_server(app, HOST, PORT, BACKLOG, 0)
             except KeyboardInterrupt:
                 exit()
 
@@ -35,5 +35,5 @@ def run_multi_process_server(app):
 def run(wsgi_app, host, port, backlog=1024):
     print("Starting server...")
     enable_logging = 0
-    _fast_wsgi.run_server(wsgi_app, host, port, backlog, enable_logging)
+    _fastwsgi.run_server(wsgi_app, host, port, backlog, enable_logging)
     # run_multi_process_server(app)

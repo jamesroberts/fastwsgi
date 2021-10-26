@@ -8,12 +8,12 @@ static PyMethodDef FastWsgiFunctions[] = {
 
 static struct PyModuleDef module = {
     PyModuleDef_HEAD_INIT,
-    "fast_wsgi",
-    "fast_wsgi Python module",
+    "fastwsgi",
+    "fastwsgi Python module",
     -1,
     FastWsgiFunctions,
 };
 
-PyMODINIT_FUNC PyInit__fast_wsgi(void) {
+PyMODINIT_FUNC PyInit__fastwsgi(void) {
   return PyModule_Create(&module);
 }
