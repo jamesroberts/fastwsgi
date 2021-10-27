@@ -17,3 +17,12 @@ def test_get_valid_wsgi_server(server_process):
     with server_process(validator_app) as server:
         result = requests.get(server.endpoint)
         assert result.text == "Valid"
+
+
+def test_post_valid_wsgi_server(server_process):
+    with server_process(validator_app) as server:
+        result = requests.post(server.endpoint)
+        assert result.text == "Valid"
+
+        result = requests.post(server.endpoint, {"test": "data"})
+        assert result.text == "Valid"

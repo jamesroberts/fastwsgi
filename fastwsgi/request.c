@@ -121,6 +121,8 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
 
 PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs) {
     StartResponse* sr = (StartResponse*)self;
+
+    sr->exc_info = NULL;
     if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &sr->status, &sr->headers, &sr->exc_info)) {
         printf("something went wrong\n");
         return NULL;
