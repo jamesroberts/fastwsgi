@@ -54,7 +54,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         }
     }
     else {
-        if (nread != UV_EOF)
+        if (nread != UV_EOF && nread != UV_ECONNRESET)
             fprintf(stderr, "Read error %s\n", uv_err_name(nread));
         uv_close((uv_handle_t*)handle, close_cb);
     }
