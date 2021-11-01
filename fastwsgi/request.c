@@ -172,7 +172,6 @@ int on_message_complete(llhttp_t* parser) {
 };
 
 void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* parser) {
-    // There is a tiny memory leak somewhere in this function...
     logger("building response");
     PyObject* iter;
 
@@ -203,9 +202,9 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
         char* header_field = PyBytes_AS_STRING(field);
         char* header_value = PyBytes_AS_STRING(value);
 
-        if (strcasecmp("Content-Length", header_field) == 0) {
-            content_length_header_present = 1;
-        }
+        if (!content_length_header_present)
+            if (strcasecmp("Content-Length", header_field) == 0)
+                content_length_header_present = 1;
 
         char* old_buf = buf;
         asprintf(&buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
@@ -230,8 +229,9 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
     Request* request = (Request*)parser->data;
 
-    request->response_buffer.base = buf;
     request->response_buffer.len = strlen(buf);
+    strcpy(request->response_buffer.base, buf);
+    free(buf);
 
     if (PyObject_HasAttrString(iter, "close")) {
         PyObject* close = PyObject_GetAttrString(iter, "close");
