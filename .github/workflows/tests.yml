@@ -11,27 +11,30 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v2
       - name: Update packages
-        run: sudo apt-get update
+        run: sudo apt-get update -yq
       - name: Install dependencies
-        run: sudo apt-get install sloccount
+        run: sudo apt-get install -yq sloccount
       - name: Verify less than 1000 lines
         run: sloccount fastwsgi.py fastwsgi/; if [ $(sloccount fastwsgi.py fastwsgi/ | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
-  # FIX ME: Need to package libuv in repo
-  # unittests:
-  #   name: Unit Tests
-  #   runs-on: ubuntu-latest
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
 
-  #   steps:
-  #     - name: Checkout Code
-  #       uses: actions/checkout@v2
-  #     - name: Update packages
-  #       run: sudo apt-get update
-  #     - name: Set up Python 3.8
-  #       uses: actions/setup-python@v2
-  #       with:
-  #         python-version: 3.8
-  #     - name: Install dependencies
-  #       run: pip install -e '.[testing]'
-  #     - name: Run unit tests
-  #       run: python -m pytest -s -v
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v2
+      - name: Update packages
+        run: sudo apt-get update -yq
+      - name: Set up Python 3.8
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+      - name: Install dependencies
+        run: |
+          sudo apt-get install -yq libuv1-dev python3-dev
+          pip install pytest requests Flask
+      - name: Install FastWSGI Extension
+        run: python setup.py install
+      - name: Run unit tests
+        run: python -m pytest -s -v -k uwsgi # Run uWSGI tests only for now
