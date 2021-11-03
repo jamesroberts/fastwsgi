@@ -229,9 +229,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
     Request* request = (Request*)parser->data;
 
+    request->response_buffer.base = buf;
     request->response_buffer.len = strlen(buf);
-    strcpy(request->response_buffer.base, buf);
-    free(buf);
 
     if (PyObject_HasAttrString(iter, "close")) {
         PyObject* close = PyObject_GetAttrString(iter, "close");

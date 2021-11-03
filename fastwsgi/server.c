@@ -11,7 +11,7 @@
 
 void logger(char* message) {
     if (LOGGING_ENABLED)
-        printf("%s\n", message);
+        fprintf(stdout, ">>> %s\n", message);
 }
 
 void close_cb(uv_handle_t* handle) {
@@ -19,12 +19,13 @@ void close_cb(uv_handle_t* handle) {
     free(handle);
 }
 
-
 void write_cb(uv_write_t* req, int status) {
     if (status) {
         fprintf(stderr, "Write error %s\n", uv_strerror(status));
     }
-    free(req);
+    write_req_t* write_req = (write_req_t*)req;
+    free(write_req->buf.base);
+    free(write_req);
 }
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
@@ -46,8 +47,8 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         if (err == HPE_OK) {
             logger("Successfully parsed");
             write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
-            req->buf = uv_buf_init(buf->base, nread);
-            uv_write((uv_write_t*)req, handle, &request->response_buffer, 1, write_cb);
+            req->buf = uv_buf_init(request->response_buffer.base, request->response_buffer.len);
+            uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
