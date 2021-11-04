@@ -19,8 +19,7 @@ class ServerProcess:
         return self
 
     def __exit__(self, exc_type, exc_value, exc_tb):
-        if self.process.is_alive():
-            self.process.terminate()
+        self.process.kill()
 
 
 @pytest.fixture(autouse=True, scope="session")

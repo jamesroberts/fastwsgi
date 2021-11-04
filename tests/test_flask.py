@@ -23,12 +23,6 @@ def test_flask_get(server_process):
 
 def test_flask_post(server_process):
     with server_process(app) as server:
-        # Post with no data
-        result = requests.post(server.endpoint)
-        assert result.status_code == 201
-        assert result.text == "post"
-
-        # Post with data
-        result = requests.post(server.endpoint, {"test": "data"})
+        result = requests.post(server.endpoint, json={"test": "data"})
         assert result.status_code == 201
         assert result.text == "post"
