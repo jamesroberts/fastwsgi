@@ -17,13 +17,16 @@ jobs:
       - name: Verify less than 1000 lines
         run: sloccount fastwsgi.py fastwsgi/; if [ $(sloccount fastwsgi.py fastwsgi/ | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
 
-  unit-tests:
-    name: Unit Tests
+  python-import:
+    name: Python import
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v2
+        with:
+          submodules: true
+          token: ${{ secrets.CI_TOKEN }}
       - name: Update packages
         run: sudo apt-get update -yq
       - name: Set up Python 3.8
@@ -36,5 +39,5 @@ jobs:
           pip install pytest requests Flask
       - name: Install FastWSGI Extension
         run: python setup.py install
-      - name: Run unit tests
-        run: python -m pytest -s -v -k uwsgi # Run uWSGI tests only for now
+      - name: Test FastWSGI Python module import
+        run: python -c "import fastwsgi"
