@@ -180,9 +180,15 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
     PyObject* result = PyIter_Next(iter);
 
-    char* buf;
+    int response_has_no_content = 0;
     PyObject* status = PyUnicode_AsUTF8String(response->status);
-    asprintf(&buf, "HTTP/1.1 %s", PyBytes_AS_STRING(status));
+    char* status_code = PyBytes_AS_STRING(status);
+    if (strncmp(status_code, "204", 3) == 0 || strncmp(status_code, "304", 3) == 0) {
+        response_has_no_content = 1;
+    }
+
+    char* buf;
+    asprintf(&buf, "HTTP/1.1 %s", status_code);
     Py_DECREF(status);
 
     char* connection_header = "\r\nConnection: close";
@@ -215,20 +221,29 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
         logger("added header");
     }
-    char* response_body = PyBytes_AS_STRING(result);
 
-    if (content_length_header_present == 0) {
+    if (response_has_no_content) {
         char* old_buf = buf;
-        asprintf(&buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body));
+        asprintf(&buf, "%s\r\n\r\n", old_buf);
+        free(old_buf);
+    }
+    else {
+        char* response_body = PyBytes_AS_STRING(result);
+
+        if (content_length_header_present == 0) {
+            char* old_buf = buf;
+            asprintf(&buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body));
+            free(old_buf);
+        }
+
+        old_buf = buf;
+        asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
         free(old_buf);
     }
 
-    old_buf = buf;
-    asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
-    free(old_buf);
-
     Request* request = (Request*)parser->data;
 
+    logger(buf);
     request->response_buffer.base = buf;
     request->response_buffer.len = strlen(buf);
 
