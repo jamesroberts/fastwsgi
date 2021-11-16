@@ -1,0 +1,7 @@
+include llhttp/include/*.h
+include llhttp/src/*.c
+include llhttp/src/*.h
+include fastwsgi/*.c
+include fastwsgi/*.h
+include LICENSE
+include README.md

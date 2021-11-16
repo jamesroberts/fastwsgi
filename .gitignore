@@ -54,3 +54,5 @@ dkms.conf
 .vscode
 bin/
 __pycache__/
+dist/
+*.egg-info/

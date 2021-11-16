@@ -1,5 +1,6 @@
-[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/jamesroberts/fast-wsgi.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/jamesroberts/fast-wsgi/context:cpp)
-[![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/jamesroberts/fast-wsgi.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/jamesroberts/fast-wsgi/context:python)
+[![Tests](https://github.com/jamesroberts/fastwsgi/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/jamesroberts/fastwsgi/actions/workflows/tests.yml)
+[![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/jamesroberts/fast-wsgi.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/jamesroberts/fastwsgi/context:cpp)
+[![Language grade: Python](https://img.shields.io/lgtm/grade/python/g/jamesroberts/fast-wsgi.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/jamesroberts/fastwsgi/context:python)
 
 # FastWSGI
 #### Note: FastWSGI is still under development...
@@ -9,6 +10,13 @@ FastWSGI is an ultra fast WSGI server for Python 3.
 It is mostly written in C. It makes use of [libuv](https://github.com/libuv/libuv) and [llhttp](https://github.com/nodejs/llhttp) under the hood for blazing fast performance. 
 
 
+## Installation
+
+Install using the [pip](https://pip.pypa.io/en/stable/) package manager.
+
+```bash
+pip install fastwsgi
+```
 
 ## Example usage with Flask
 
@@ -50,11 +58,14 @@ To run the test suite using [pytest](https://docs.pytest.org/en/latest/getting-s
 python3 -m pytest
 ```
 
+## Contributing
+Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
+
+Please make sure to update tests as appropriate.
+
 ## TODO
 
-- Test integration with other frameworks (uWSGI, Django, etc)
 - Comprehensive error handling
 - Complete HTTP/1.1 compliance
 - Test on multiple platforms (Windows/MacOS)
-- Unit Tests
-- CI/CD
+- Unit tests running in CI workflow
