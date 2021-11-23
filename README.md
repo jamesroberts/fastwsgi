@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
 ```python
 def application(environ, start_response):
-    start_response("200 OK", [("Content-Type", "text/html")])
+    start_response("200 OK", [("Content-Type", "text/plain")])
     return [b"Hello, World!"]
 
 if __name__ == "__main__":
@@ -69,3 +69,4 @@ Please make sure to update tests as appropriate.
 - Complete HTTP/1.1 compliance
 - Test on multiple platforms (Windows/MacOS)
 - Unit tests running in CI workflow
+- Invoke WSGI app from server.c (from within libuv loop) instead of in request.c (in llhttp parsing callbacks)

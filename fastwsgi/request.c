@@ -89,11 +89,8 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
         if (current == '-') {
             upperHeader[i] = '_';
         }
-        else if (current >= 'a' && current <= 'z') {
-            upperHeader[i] = current - ('a' - 'A');
-        }
         else {
-            upperHeader[i] = current;
+            upperHeader[i] = toupper(current);
         }
     }
     upperHeader[length] = 0;
