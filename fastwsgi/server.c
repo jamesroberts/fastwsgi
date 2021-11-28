@@ -31,15 +31,8 @@ void write_cb(uv_write_t* req, int status) {
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t* client = (client_t*)handle->data;
 
-    struct sockaddr sockname;
-    struct sockaddr_in* addr = (struct sockaddr_in*)&sockname;
-    int socklen = sizeof(sockname);
-
     Request* request = malloc(sizeof(Request));
-    uv_tcp_getsockname((uv_tcp_t*)handle, &sockname, &socklen);
-    uv_ip4_name(addr, request->remote_addr, sizeof(request->remote_addr));
-
-    llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
+    strcpy(request->remote_addr, client->remote_addr);
     client->parser.data = request;
 
     if (nread >= 0) {
@@ -82,9 +75,17 @@ void connection_cb(uv_stream_t* server, int status) {
     uv_tcp_nodelay(&client->handle, 0);
     uv_tcp_keepalive(&client->handle, 1, 60);
 
+    struct sockaddr sockname;
+    struct sockaddr_in* addr = (struct sockaddr_in*)&sockname;
+    int socklen = sizeof(sockname);
+
+    uv_tcp_getsockname((uv_tcp_t*)&client->handle, &sockname, &socklen);
+    uv_ip4_name(addr, client->remote_addr, sizeof(client->remote_addr));
+
     client->handle.data = client;
 
     if (uv_accept(server, (uv_stream_t*)&client->handle) == 0) {
+        llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
     }
     else {

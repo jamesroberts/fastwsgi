@@ -36,4 +36,4 @@ def run(wsgi_app, host, port, backlog=1024):
     print("Starting server...")
     enable_logging = 0
     _fastwsgi.run_server(wsgi_app, host, port, backlog, enable_logging)
-    # run_multi_process_server(app)
+    # run_multi_process_server(wsgi_app)

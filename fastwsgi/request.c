@@ -164,7 +164,6 @@ int on_message_complete(llhttp_t* parser) {
 
     Py_CLEAR(wsgi_response);
     Py_CLEAR(request->headers);
-
     return 0;
 };
 

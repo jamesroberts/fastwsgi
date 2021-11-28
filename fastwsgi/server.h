@@ -22,6 +22,7 @@ typedef struct {
 typedef struct {
     uv_tcp_t handle;
     llhttp_t parser;
+    char remote_addr[17];
 } client_t;
 
 PyObject* run_server(PyObject* self, PyObject* args);
