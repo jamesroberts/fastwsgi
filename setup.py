@@ -17,7 +17,7 @@ with open("README.md", "r", encoding="utf-8") as read_me:
 
 setup(
     name="fastwsgi",
-    version="0.0.1",
+    version="0.0.2",
     author="James Roberts",
     py_modules=["fastwsgi"],
     ext_modules=[module],
