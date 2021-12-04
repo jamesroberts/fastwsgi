@@ -20,7 +20,6 @@ else:
         'libuv/src/unix/loop.c',
         'libuv/src/unix/pipe.c',
         'libuv/src/unix/poll.c',
-        'libuv/src/unix/epoll.c',
         'libuv/src/unix/process.c',
         'libuv/src/unix/signal.c',
         'libuv/src/unix/stream.c',
@@ -39,7 +38,8 @@ if sys.platform.startswith('linux'):
         'libuv/src/unix/linux-syscalls.c',
         'libuv/src/unix/procfs-exepath.c',
         'libuv/src/unix/proctitle.c',
-        'libuv/src/unix/random-sysctl-linux.c'
+        'libuv/src/unix/random-sysctl-linux.c',
+        'libuv/src/unix/epoll.c',
     ]
 elif sys.platform == 'darwin':
     SOURCES += [
@@ -49,7 +49,8 @@ elif sys.platform == 'darwin':
         'libuv/src/unix/fsevents.c',
         'libuv/src/unix/kqueue.c',
         'libuv/src/unix/proctitle.c',
-        'libuv/src/unix/pthread-barrier.c',
+        'libuv/src/unix/pthread-fixes.c',
+        'libuv/src/unix/random-getentropy.c',
     ]
 elif sys.platform.startswith(('freebsd', 'dragonfly')):
     SOURCES += [
