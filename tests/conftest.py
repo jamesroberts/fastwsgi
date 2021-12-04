@@ -1,7 +1,7 @@
 import pytest
 import fastwsgi
 import time
-from multiprocessing import Process
+from multiprocessing import Process, set_start_method
 
 
 HOST = "127.0.0.1"
@@ -24,4 +24,5 @@ class ServerProcess:
 
 @pytest.fixture(autouse=True, scope="session")
 def server_process():
+    set_start_method("fork")
     return ServerProcess
