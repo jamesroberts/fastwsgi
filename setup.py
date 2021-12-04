@@ -1,5 +1,6 @@
 import glob
 from distutils.core import Extension, setup
+from setup_libuv import build_libuv
 
 
 SOURCES = glob.glob("fastwsgi/*.c") + glob.glob("llhttp/src/*.c")
@@ -7,9 +8,8 @@ SOURCES = glob.glob("fastwsgi/*.c") + glob.glob("llhttp/src/*.c")
 module = Extension(
     "_fastwsgi",
     sources=SOURCES,
-    libraries=['uv'],
-    include_dirs=["llhttp/include"],
-    extra_compile_args=["-O3", "-fno-strict-aliasing"]
+    include_dirs=["llhttp/include", "uv/include"],
+    extra_compile_args=["-O3", "-fno-strict-aliasing", "-fcommon"]
 )
 
 with open("README.md", "r", encoding="utf-8") as read_me:
@@ -37,4 +37,5 @@ setup(
         "Development Status :: 3 - Alpha",
     ],
     python_requires=">=3.6",
+    cmdclass={'build_ext': build_libuv},
 )
