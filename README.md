@@ -15,10 +15,10 @@ It is a sub 1000 line Python extension written in C. It uses [libuv](https://git
 ## Supported Platforms
 
 | Platform | Supported |
-| - | - |
-| Linux | :white_check_mark: |
-| MacOS | :white_check_mark: |
-| Windows | :white_check_mark: |
+| :------: | :-------: |
+| Linux    | :white_check_mark: |
+| MacOS    | :white_check_mark: |
+| Windows  | :white_check_mark: |
 
 
 ## Installation
