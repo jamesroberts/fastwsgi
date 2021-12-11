@@ -98,8 +98,7 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     char* old_header = current_header;
 
     if ((strcmp(upperHeader, "CONTENT_LENGTH") == 0) || (strcmp(upperHeader, "CONTENT_TYPE") == 0)) {
-        current_header = malloc(strlen(upperHeader));
-        strcpy(current_header, upperHeader);
+        current_header = upperHeader;
     }
     else {
         current_header = malloc(strlen(upperHeader) + 5);
