@@ -17,7 +17,8 @@ with open("README.md", "r", encoding="utf-8") as read_me:
 
 setup(
     name="fastwsgi",
-    version="0.0.2",
+    version="0.0.3",
+    license="MIT",
     author="James Roberts",
     py_modules=["fastwsgi"],
     ext_modules=[module],
@@ -28,6 +29,7 @@ setup(
     url="https://github.com/jamesroberts/fastwsgi",
     project_urls={
         "Bug Tracker": "https://github.com/jamesroberts/fastwsgi/issues",
+        "Source": "https://github.com/jamesroberts/fastwsgi",
     },
     classifiers=[
         "License :: OSI Approved :: MIT License",
