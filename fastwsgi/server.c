@@ -115,7 +115,8 @@ int main() {
     uv_fileno((const uv_handle_t*)&server, &file_descriptor);
 
     int enabled = 1;
-    setsockopt(file_descriptor, SOL_SOCKET, SO_REUSEPORT, &enabled, sizeof(&enabled));
+    int so_reuseport = 15;
+    setsockopt(file_descriptor, SOL_SOCKET, so_reuseport, &enabled, sizeof(&enabled));
 
     int err = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
     if (err) {

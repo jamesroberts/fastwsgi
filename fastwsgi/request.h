@@ -1,3 +1,9 @@
+#ifdef _MSC_VER
+// strncasecmp is not available on Windows
+#define strncasecmp _strnicmp
+#define strcasecmp _stricmp
+#endif
+
 typedef struct {
     PyObject* headers;
     char remote_addr[17];
@@ -6,7 +12,7 @@ typedef struct {
 } Request;
 
 typedef struct {
-    PyObject_HEAD;
+    PyObject ob_base;
     PyObject* status;
     PyObject* headers;
     PyObject* exc_info;

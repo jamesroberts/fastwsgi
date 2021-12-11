@@ -2,7 +2,6 @@ import os
 import signal
 import _fastwsgi
 
-
 NUM_WORKERS = 4
 HOST = "0.0.0.0"
 PORT = 5000
@@ -11,7 +10,6 @@ BACKLOG = 1024
 
 def run_multi_process_server(app):
     workers = []
-
     for _ in range(NUM_WORKERS):
         pid = os.fork()
         if pid > 0:

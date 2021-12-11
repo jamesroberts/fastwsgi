@@ -46,7 +46,7 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
     logger("on url");
     Request* request = (Request*)parser->data;
 
-    char url[length + 1];
+    char* url = malloc(length + 1);
     strncpy(url, data, length);
     url[length] = 0;
 
@@ -57,6 +57,7 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
     if (query_string) {
         set_header(request->headers, "QUERY_STRING", query_string, strlen(query_string));
     }
+    free(url);
     return 0;
 };
 
@@ -83,7 +84,7 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     logger("on header field");
 
-    char upperHeader[length + 1];
+    char* upperHeader = malloc(length + 1);
     for (size_t i = 0; i < length; i++) {
         char current = header[i];
         if (current == '-') {
@@ -97,10 +98,12 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     char* old_header = current_header;
 
     if ((strcmp(upperHeader, "CONTENT_LENGTH") == 0) || (strcmp(upperHeader, "CONTENT_TYPE") == 0)) {
-        asprintf(&current_header, "%s", upperHeader);
+        current_header = malloc(strlen(upperHeader));
+        strcpy(current_header, upperHeader);
     }
     else {
-        asprintf(&current_header, "HTTP_%s", upperHeader);
+        current_header = malloc(strlen(upperHeader) + 5);
+        sprintf(current_header, "HTTP_%s", upperHeader);
     }
 
     if (old_header)
@@ -183,8 +186,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
         response_has_no_content = 1;
     }
 
-    char* buf;
-    asprintf(&buf, "HTTP/1.1 %s", status_code);
+    char* buf = malloc(strlen(status_code) + 10);
+    sprintf(buf, "HTTP/1.1 %s", status_code);
     Py_DECREF(status);
 
     char* connection_header = "\r\nConnection: close";
@@ -192,7 +195,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
         connection_header = "\r\nConnection: Keep-Alive";
 
     char* old_buf = buf;
-    asprintf(&buf, "%s%s", old_buf, connection_header);
+    buf = malloc(strlen(old_buf) + strlen(connection_header));
+    sprintf(buf, "%s%s", old_buf, connection_header);
     free(old_buf);
 
     int content_length_header_present = 0;
@@ -209,7 +213,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
                 content_length_header_present = 1;
 
         char* old_buf = buf;
-        asprintf(&buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
+        buf = malloc(strlen(old_buf) + strlen(header_field) + strlen(header_value) + 5);
+        sprintf(buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
         free(old_buf);
 
         Py_DECREF(field);
@@ -220,7 +225,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
     if (response_has_no_content) {
         char* old_buf = buf;
-        asprintf(&buf, "%s\r\n\r\n", old_buf);
+        buf = malloc(strlen(old_buf) + 5);
+        sprintf(buf, "%s\r\n\r\n", old_buf);
         free(old_buf);
     }
     else {
@@ -228,12 +234,14 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
         if (content_length_header_present == 0) {
             char* old_buf = buf;
-            asprintf(&buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body));
+            buf = malloc(strlen(old_buf) + 32);
+            sprintf(buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body));
             free(old_buf);
         }
 
-        old_buf = buf;
-        asprintf(&buf, "%s\r\n\r\n%s", old_buf, response_body);
+        char* old_buf = buf;
+        buf = malloc(strlen(old_buf) + strlen(response_body) + 5);
+        sprintf(buf, "%s\r\n\r\n%s", old_buf, response_body);
         free(old_buf);
     }
 
