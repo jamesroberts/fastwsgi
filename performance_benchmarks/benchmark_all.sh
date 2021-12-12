@@ -1,16 +1,16 @@
 pip install -r requirements.txt
 
 echo "Benchmarking Flask"
-./benchmark_basic_flask.sh
+./benchmarks/benchmark_basic_flask.sh
 
 echo "Benchmarking Flask + Gunicorn"
-./benchmark_gunicorn_flask.sh
+./benchmarks/benchmark_gunicorn_flask.sh
 
 echo "Benchmarking Flask + FastWSGI"
-./benchmark_fastwsgi_flask.sh
+./benchmarks/benchmark_fastwsgi_flask.sh
 
 echo "Benchmarking Flask + Bjoern"
-./benchmark_bjoern_flask.sh
+./benchmarks/benchmark_bjoern_flask.sh
 
 echo "Benchmarking CherryPy"
-./benchmark_cherrypy.sh
+./benchmarks/benchmark_cherrypy.sh

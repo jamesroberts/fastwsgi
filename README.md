@@ -34,7 +34,7 @@ pip install fastwsgi
 
 ## Performance
 
-FastWSGI is one of the fastest general use WSGI servers out there!
+FastWSGI is one of the fastest general use WSGI servers out there! 
 
 For a comparison between other popular WSGI servers, see [PERFORMANCE.md](./performance_benchmarks/PERFORMANCE.md)
 
