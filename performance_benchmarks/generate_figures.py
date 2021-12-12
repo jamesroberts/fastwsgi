@@ -8,7 +8,7 @@ def y_fmt(x, y):
 
 def requests_per_second_graph(save_name, data):
     fig = plt.figure()
-    fig.set_size_inches(8, 6)
+    fig.set_size_inches(6, 4)
     ax = fig.add_axes([0, 0, 1, 1])
 
     labels = [dp[0] for dp in data]
@@ -22,7 +22,7 @@ def requests_per_second_graph(save_name, data):
 
 def requests_served_graph(save_name, data):
     fig = plt.figure()
-    fig.set_size_inches(8, 6)
+    fig.set_size_inches(6, 4)
     ax = fig.add_axes([0, 0, 1, 1])
 
     labels = [dp[0] for dp in data]
@@ -57,6 +57,7 @@ flask_benchmarks = {
 
 wsgi_benchmarks = {
     "Gunicorn": "results/gunicorn_wsgi_results.txt",
+    "Uvicorn": "results/uvicorn_asgi_results.txt",
     "Bjoern": "results/bjoern_wsgi_results.txt",
     "FastWSGI": "results/fastwsgi_wsgi_results.txt",
 }

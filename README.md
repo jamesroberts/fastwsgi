@@ -39,6 +39,21 @@ FastWSGI is one of the fastest general use WSGI servers out there!
 For a comparison between other popular WSGI servers, see [PERFORMANCE.md](./performance_benchmarks/PERFORMANCE.md)
 
 
+## Quick start
+
+```python
+import fastwsgi
+
+def application(environ, start_response):
+    headers = [('Content-Type', 'text/plain')]
+    start_response('200 OK', headers)
+    return [b'Hello, World!']
+
+if __name__ == '__main__':
+    fastwsgi.run(wsgi_app=application, host='127.0.0.1', port=5000)
+```
+
+
 ## Example usage with Flask
 
 See [example.py](https://github.com/jamesroberts/fast-wsgi/blob/main/example.py) for more details.
@@ -57,21 +72,6 @@ def hello_world():
 
 if __name__ == '__main__':
     fastwsgi.run(wsgi_app=app, host='127.0.0.1', port=5000)
-```
-
-
-## Example usage with uWSGI
-
-```python
-import fastwsgi
-
-def application(environ, start_response):
-    headers = [('Content-Type', 'text/plain')]
-    start_response('200 OK', headers)
-    return [b'Hello, World!']
-
-if __name__ == '__main__':
-    fastwsgi.run(wsgi_app=application, host='127.0.0.1', port=5000)
 ```
 
 

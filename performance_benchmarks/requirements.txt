@@ -5,4 +5,4 @@ uwsgi
 bjoern
 fastwsgi
 matplotlib
-numpy
+uvicorn
