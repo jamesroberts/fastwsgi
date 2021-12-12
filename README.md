@@ -32,11 +32,11 @@ pip install fastwsgi
 ```
 
 
-## Quick start
+## Performance
 
-```bash
-python3 example.py
-```
+FastWSGI is one of the fastest general use WSGI servers out there!
+
+For a comparison between other popular WSGI servers, see [PERFORMANCE.md](./perfomance_tests/PERFORMANCE.md)
 
 
 ## Example usage with Flask
