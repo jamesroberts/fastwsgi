@@ -1,5 +1,6 @@
 import glob
-from distutils.core import Extension, setup
+from setuptools import setup
+from distutils.core import Extension
 from setup_libuv import build_libuv
 
 
@@ -17,7 +18,7 @@ with open("README.md", "r", encoding="utf-8") as read_me:
 
 setup(
     name="fastwsgi",
-    version="0.0.3",
+    version="0.0.4",
     license="MIT",
     author="James Roberts",
     py_modules=["fastwsgi"],
@@ -40,4 +41,9 @@ setup(
     ],
     python_requires=">=3.6",
     cmdclass={"build_ext": build_libuv},
+    entry_points={
+        "console_scripts": [
+            "fastwsgi = fastwsgi:run_from_cli",
+        ],
+    },
 )

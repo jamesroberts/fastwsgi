@@ -11,7 +11,7 @@
 
 FastWSGI is an ultra fast WSGI server for Python 3.  
 
-It is a sub 1000 line Python extension written in C. It uses [libuv](https://github.com/libuv/libuv) and [llhttp](https://github.com/nodejs/llhttp) under the hood for blazing fast performance. 
+Its written in C and uses [libuv](https://github.com/libuv/libuv) and [llhttp](https://github.com/nodejs/llhttp) under the hood for blazing fast performance.
 
 
 ## Supported Platforms
@@ -36,21 +36,41 @@ pip install fastwsgi
 
 FastWSGI is one of the fastest general use WSGI servers out there! 
 
-For a comparison between other popular WSGI servers, see [PERFORMANCE.md](./performance_benchmarks/PERFORMANCE.md)
+For a comparison against other popular WSGI servers, see [PERFORMANCE.md](./performance_benchmarks/PERFORMANCE.md)
 
 
 ## Quick start
 
+Create a new file `example.py` with the following:
+
 ```python
 import fastwsgi
 
-def application(environ, start_response):
+def app(environ, start_response):
     headers = [('Content-Type', 'text/plain')]
     start_response('200 OK', headers)
     return [b'Hello, World!']
 
 if __name__ == '__main__':
-    fastwsgi.run(wsgi_app=application, host='127.0.0.1', port=5000)
+    fastwsgi.run(wsgi_app=app, host='0.0.0.0', port=5000)
+```
+
+Run the server using:
+
+```bash
+python3 example.py
+```
+
+Or start the server via the command line using:
+
+```bash
+fastwsgi example:app
+```
+
+You might need to set your `PYTHONPATH` if `example:app` cannot be found:
+
+```bash
+PYTHONPATH=. fastwsgi example:app
 ```
 
 
