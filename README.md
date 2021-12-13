@@ -1,3 +1,6 @@
+<p align="center"><img src="./logo.png"></p>
+
+--------------------------------------------------------------------
 
 [![Tests](https://github.com/jamesroberts/fastwsgi/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/jamesroberts/fastwsgi/actions/workflows/tests.yml)
 [![Pypi](https://img.shields.io/pypi/v/fastwsgi.svg?style=flat)](https://pypi.python.org/pypi/fastwsgi)
