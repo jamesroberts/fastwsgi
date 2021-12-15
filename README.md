@@ -1,7 +1,6 @@
 <p align="center"><img src="./logo.png"></p>
 
 --------------------------------------------------------------------
-
 [![Tests](https://github.com/jamesroberts/fastwsgi/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/jamesroberts/fastwsgi/actions/workflows/tests.yml)
 [![Pypi](https://img.shields.io/pypi/v/fastwsgi.svg?style=flat)](https://pypi.python.org/pypi/fastwsgi)
 [![Language grade: C/C++](https://img.shields.io/lgtm/grade/cpp/g/jamesroberts/fast-wsgi.svg?logo=lgtm&logoWidth=18)](https://lgtm.com/projects/g/jamesroberts/fastwsgi/context:cpp)
@@ -19,11 +18,16 @@ Its written in C and uses [libuv](https://github.com/libuv/libuv) and [llhttp](h
 
 ## Supported Platforms
 
-| Platform | Supported |
-| :------: | :-------: |
-| Linux    | :white_check_mark: |
-| MacOS    | :white_check_mark: |
-| Windows  | :white_check_mark: |
+| Platform | Linux | MacOs | Windows |
+| :------: | :---: | :---: | :-----: |
+| <b>Support</b>  | :white_check_mark: |  :white_check_mark: |  :white_check_mark: |
+
+
+## Performance
+
+FastWSGI is one of the fastest general use WSGI servers out there!
+
+For a comparison against other popular WSGI servers, see [PERFORMANCE.md](./performance_benchmarks/PERFORMANCE.md)
 
 
 ## Installation
@@ -33,13 +37,6 @@ Install using the [pip](https://pip.pypa.io/en/stable/) package manager.
 ```bash
 pip install fastwsgi
 ```
-
-
-## Performance
-
-FastWSGI is one of the fastest general use WSGI servers out there! 
-
-For a comparison against other popular WSGI servers, see [PERFORMANCE.md](./performance_benchmarks/PERFORMANCE.md)
 
 
 ## Quick start
@@ -64,16 +61,10 @@ Run the server using:
 python3 example.py
 ```
 
-Or start the server via the command line using:
+Or, by using the `fastwsgi` command:
 
 ```bash
 fastwsgi example:app
-```
-
-You might need to set your `PYTHONPATH` if `example:app` cannot be found:
-
-```bash
-PYTHONPATH=. fastwsgi example:app
 ```
 
 
@@ -111,7 +102,7 @@ python3 -m pytest
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
 
-Please make sure to update tests as appropriate.
+Please make sure to update tests where appropriate.
 
 
 ## TODO
