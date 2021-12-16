@@ -26,3 +26,6 @@ echo "Benchmarking WSGI + Bjoern"
 
 echo "Benchmarking ASGI Uvicorn"
 ./benchmarks/benchmark_uvicorn_asgi.sh
+
+echo "Benchmarking uWSGI"
+./benchmarks/benchmark_uwsgi.sh

@@ -6,3 +6,4 @@ bjoern
 fastwsgi
 matplotlib
 uvicorn
+uwsgi

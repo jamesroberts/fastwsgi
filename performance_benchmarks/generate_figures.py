@@ -28,7 +28,7 @@ def requests_served_graph(save_name, data):
     labels = [dp[0] for dp in data]
     rs = [dp[1] for dp in data]
     ax.set_ylabel("Requests served")
-    ax.set_title("Requests serverd in 60 seconds")
+    ax.set_title("Requests served in 60 seconds")
     ax.yaxis.set_major_formatter(FuncFormatter(y_fmt))
     ax.bar(labels, rs)
     plt.savefig(f"graphs/{save_name}", bbox_inches="tight", pad_inches=0.3, dpi=200)
@@ -51,6 +51,7 @@ flask_benchmarks = {
     "CherryPy": "results/cherrypy_results.txt",
     "Flask": "results/basic_flask_results.txt",
     "Flask+\nGunicorn": "results/gunicorn_flask_results.txt",
+    "Flask+\nuWSGI": "results/uwsgi_flask_results.txt",
     "Flask+\nBjoern": "results/bjoern_flask_results.txt",
     "Flask+\nFastWSGI": "results/fastwsgi_flask_results.txt",
 }
@@ -58,6 +59,7 @@ flask_benchmarks = {
 wsgi_benchmarks = {
     "Gunicorn": "results/gunicorn_wsgi_results.txt",
     "Uvicorn": "results/uvicorn_asgi_results.txt",
+    "uWSGI": "results/basic_uwsgi_results.txt",
     "Bjoern": "results/bjoern_wsgi_results.txt",
     "FastWSGI": "results/fastwsgi_wsgi_results.txt",
 }
