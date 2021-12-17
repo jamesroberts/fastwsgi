@@ -39,6 +39,7 @@ int on_message_begin(llhttp_t* parser) {
     logger("on message begin");
     Request* request = (Request*)parser->data;
     request->headers = PyDict_Copy(base_dict);
+    request->response_buffer.len = 0;
     return 0;
 };
 

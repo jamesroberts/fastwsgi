@@ -9,6 +9,8 @@
 #include "request.h"
 #include "constants.h"
 
+static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
+
 void logger(char* message) {
     if (LOGGING_ENABLED)
         fprintf(stdout, ">>> %s\n", message);
@@ -28,6 +30,19 @@ void write_cb(uv_write_t* req, int status) {
     free(write_req);
 }
 
+void send_error(write_req_t* req, uv_stream_t* handle, const char* error_string) {
+    char* error = malloc(strlen(error_string) + 1);
+    strcpy(error, error_string);
+    req->buf = uv_buf_init(error, strlen(error));
+    uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
+    uv_close((uv_handle_t*)handle, close_cb);
+}
+
+void send_response(write_req_t* req, uv_stream_t* handle, uv_buf_t response_buffer) {
+    req->buf = uv_buf_init(response_buffer.base, response_buffer.len);
+    uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
+}
+
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t* client = (client_t*)handle->data;
 
@@ -35,16 +50,22 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     strcpy(request->remote_addr, client->remote_addr);
     client->parser.data = request;
 
+    write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
+
     if (nread >= 0) {
         enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
         if (err == HPE_OK) {
             logger("Successfully parsed");
-            write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
-            req->buf = uv_buf_init(request->response_buffer.base, request->response_buffer.len);
-            uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
+            if (request->response_buffer.len > 0) {
+                send_response(req, handle, request->response_buffer);
+            }
+            else {
+                send_error(req, handle, BAD_REQUEST);
+            }
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
+            send_error(req, handle, BAD_REQUEST);
         }
     }
     else {
