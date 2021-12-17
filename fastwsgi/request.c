@@ -87,6 +87,10 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     char* upperHeader = malloc(length + 1);
     for (size_t i = 0; i < length; i++) {
         char current = header[i];
+        if (current == '_') {
+            current_header = NULL;  // CVE-2015-0219
+            return 0;
+        }
         if (current == '-') {
             upperHeader[i] = '_';
         }
@@ -113,8 +117,10 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
 
 int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     logger("on header value");
-    Request* request = (Request*)parser->data;
-    set_header(request->headers, current_header, value, length);
+    if (current_header != NULL) {
+        Request* request = (Request*)parser->data;
+        set_header(request->headers, current_header, value, length);
+    }
     return 0;
 };
 
