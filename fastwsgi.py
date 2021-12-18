@@ -48,9 +48,9 @@ def import_from_string(import_str):
     return module
 
 
-def print_server_details():
+def print_server_details(host, port):
     print(f"\n==== FastWSGI ==== ")
-    print(f"Host: {HOST}\nPort: {PORT}")
+    print(f"Host: {host}\nPort: {port}")
     print("==================\n")
 
 
@@ -65,8 +65,8 @@ def run_from_cli():
     _fastwsgi.run_server(wsgi_app, "", PORT, BACKLOG, LOGGING)
 
 
-def run(wsgi_app, host, port, backlog=1024):
-    print_server_details()
+def run(wsgi_app, host=HOST, port=PORT, backlog=1024):
+    print_server_details(host, port)
     print(f"Server listening at http://{host}:{port}")
     _fastwsgi.run_server(wsgi_app, host, port, backlog, LOGGING)
     # run_multi_process_server(wsgi_app)

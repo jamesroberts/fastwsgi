@@ -2,3 +2,6 @@ path_classifiers:
   library:
     - llhttp/**/*.c
     - llhttp/**/*.h
+    - libuv/**/*.c
+    - libuv/**/*.h
+    - performance_benchmarks/**/*.py

@@ -1,40 +1,22 @@
 import requests
-from flask import Flask
-
-app = Flask(__name__)
 
 
-@app.get("/")
-def get():
-    return "get", 200
+def test_flask_get(flask_test_server):
+    url = f"{flask_test_server.endpoint}/get"
+    result = requests.get(url)
+    assert result.status_code == 200
+    assert result.text == "get"
 
 
-@app.post("/")
-def post():
-    return "post", 201
+def test_flask_post(flask_test_server):
+    url = f"{flask_test_server.endpoint}/post"
+    result = requests.post(url, json={"test": "data"})
+    assert result.status_code == 201
+    assert result.text == "post"
 
 
-@app.delete("/")
-def delete():
-    return "", 204
-
-
-def test_flask_get(server_process):
-    with server_process(app) as server:
-        result = requests.get(server.endpoint)
-        assert result.status_code == 200
-        assert result.text == "get"
-
-
-def test_flask_post(server_process):
-    with server_process(app) as server:
-        result = requests.post(server.endpoint, json={"test": "data"})
-        assert result.status_code == 201
-        assert result.text == "post"
-
-
-def test_flask_delete(server_process):
-    with server_process(app) as server:
-        result = requests.delete(server.endpoint)
-        assert result.status_code == 204
-        assert result.text == ""
+def test_flask_delete(flask_test_server):
+    url = f"{flask_test_server.endpoint}/delete"
+    result = requests.delete(url)
+    assert result.status_code == 204
+    assert result.text == ""
