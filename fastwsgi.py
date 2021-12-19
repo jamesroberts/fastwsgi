@@ -2,14 +2,15 @@ import os
 import sys
 import signal
 import importlib
+import click
 import _fastwsgi
+from pkg_resources import get_distribution
 
 NUM_WORKERS = 4
 HOST = "0.0.0.0"
 PORT = 5000
 BACKLOG = 1024
 LOGGING = 0
-
 
 def run_multi_process_server(app):
     workers = []
@@ -54,15 +55,29 @@ def print_server_details(host, port):
     print("==================\n")
 
 
-def run_from_cli():
-    if len(sys.argv[1:]) < 1:
-        raise ValueError("No import string provided")
+@click.command()
+@click.version_option(version=get_distribution("fastwsgi").version, message="%(version)s")
+@click.option("--host", help="Host the socket is bound to.", type=str, default=HOST, show_default=True)
+@click.option("-p", "--port", help="Port the socket is bound to.", type=int, default=PORT, show_default=True)
+@click.option("-l", "--logging", help="Enable logging.", default=bool(LOGGING), is_flag=True, type=bool, show_default=True)
+@click.argument(
+    "wsgi_app_import_string",
+    type=str,
+    required=True,
+)
+def run_from_cli(host, port, wsgi_app_import_string, logging):
+    """
+    Run FastWSGI server from CLI
+    """
+    try:
+        wsgi_app = import_from_string(wsgi_app_import_string)
+    except ImportError as e:
+        print(f"Error importing WSGI app: {e}")
+        sys.exit(1)
 
-    sys.path.insert(0, ".")
-    wsgi_app = import_from_string(sys.argv[1])
-    print_server_details(HOST, PORT)
-    print(f"Server listening at http://{HOST}:{PORT}")
-    _fastwsgi.run_server(wsgi_app, "", PORT, BACKLOG, LOGGING)
+    print_server_details(host, port)
+    print(f"Server listening at http://{host}:{port}")
+    _fastwsgi.run_server(wsgi_app, host, port, BACKLOG, int(logging))
 
 
 def run(wsgi_app, host=HOST, port=PORT, backlog=1024):

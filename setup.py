@@ -40,6 +40,7 @@ setup(
         "Development Status :: 3 - Alpha",
     ],
     python_requires=">=3.6",
+    install_requires=["click>=7.0"],
     cmdclass={"build_ext": build_libuv},
     entry_points={
         "console_scripts": [
