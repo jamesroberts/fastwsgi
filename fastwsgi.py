@@ -60,7 +60,7 @@ def run_from_cli():
 
     sys.path.insert(0, ".")
     wsgi_app = import_from_string(sys.argv[1])
-    print_server_details()
+    print_server_details(HOST, PORT)
     print(f"Server listening at http://{HOST}:{PORT}")
     _fastwsgi.run_server(wsgi_app, "", PORT, BACKLOG, LOGGING)
 

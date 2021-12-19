@@ -51,13 +51,13 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
     strncpy(url, data, length);
     url[length] = 0;
 
-    char* path = strtok(url, "?");
-    set_header(request->headers, "PATH_INFO", path, strlen(path));
-
-    char* query_string = strtok(NULL, "");
+    char* query_string = strchr(url, '?');
     if (query_string) {
-        set_header(request->headers, "QUERY_STRING", query_string, strlen(query_string));
+        *query_string = 0;
+        set_header(request->headers, "QUERY_STRING", query_string + 1, strlen(query_string + 1));
     }
+    set_header(request->headers, "PATH_INFO", url, strlen(url));
+
     free(url);
     return 0;
 };
@@ -75,10 +75,6 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
     Py_XDECREF(result);
     Py_XDECREF(body_content);
 
-    PyObject* seek = PyUnicode_FromString("seek");
-    PyObject* res = PyObject_CallMethodObjArgs(input, seek, PyLong_FromLong(0L), NULL);
-    Py_DECREF(seek);
-    Py_XDECREF(res);
     return 0;
 };
 
@@ -154,6 +150,14 @@ PyTypeObject StartResponse_Type = {
 int on_message_complete(llhttp_t* parser) {
     logger("on message complete");
     Request* request = (Request*)parser->data;
+
+    // Sets the input byte stream position back to 0
+    PyObject* body = PyDict_GetItem(request->headers, wsgi_input);
+    PyObject* seek = PyUnicode_FromString("seek");
+    PyObject* res = PyObject_CallMethodObjArgs(body, seek, PyLong_FromLong(0L), NULL);
+    Py_DECREF(res);
+    Py_DECREF(seek);
+
     build_wsgi_environ(parser);
 
     StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
@@ -295,6 +299,7 @@ void init_request_dict() {
     PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
     PyDict_SetItem(base_dict, SERVER_NAME, server_host);
     PyDict_SetItem(base_dict, SERVER_PORT, server_port);
+    PyDict_SetItem(base_dict, QUERY_STRING, empty_string);
     PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);
     PyDict_SetItem(base_dict, wsgi_version, version);
     PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);

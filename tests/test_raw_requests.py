@@ -8,7 +8,6 @@ raw_requests = [
     "/\r\n\r\n",
     "GET ???\r\n\r\n",
     "GET / HTTP\r\n\r\n",
-    "\r\n",
 ]
 
 

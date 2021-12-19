@@ -6,6 +6,7 @@ void init_constants() {
     SERVER_NAME = PyUnicode_FromString("SERVER_NAME");
     SERVER_PORT = PyUnicode_FromString("SERVER_PORT");
     SERVER_PROTOCOL = PyUnicode_FromString("SERVER_PROTOCOL");
+    QUERY_STRING = PyUnicode_FromString("QUERY_STRING");
     PATH_INFO = Py_BuildValue("s", "PATH_INFO");
     HTTP_ = PyUnicode_FromString("HTTP_");
 
