@@ -48,7 +48,6 @@ def extract_data(req_ps, req_served, benchmarks):
 
 
 flask_benchmarks = {
-    "CherryPy": "results/cherrypy_results.txt",
     "Flask": "results/basic_flask_results.txt",
     "Flask+\nGunicorn": "results/gunicorn_flask_results.txt",
     "Flask+\nuWSGI": "results/uwsgi_flask_results.txt",

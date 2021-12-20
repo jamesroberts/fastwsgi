@@ -12,9 +12,6 @@ echo "Benchmarking Flask + FastWSGI"
 echo "Benchmarking Flask + Bjoern"
 ./benchmarks/benchmark_bjoern_flask.sh
 
-echo "Benchmarking CherryPy"
-./benchmarks/benchmark_cherrypy.sh
-
 echo "Benchmarking Cheroot"
 ./benchmarks/benchmark_cheroot_wsgi.sh
 

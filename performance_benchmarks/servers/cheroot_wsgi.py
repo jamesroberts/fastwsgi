@@ -3,15 +3,7 @@ Adapted from https://github.com/cherrypy/cheroot/blob/master/cheroot/test/test_w
 """
 
 from cheroot import wsgi
+from gunicorn_wsgi import application
 
-def simple_wsgi_server():
-    def app(_environ, start_response):
-        status = '200 OK'
-        response_headers = [('Content-type', 'text/plain')]
-        start_response(status, response_headers)
-        return [b'Hello world!']
-    server = wsgi.Server(("localhost", 8080), app, timeout=100)
-    return server
-
-server = simple_wsgi_server()
+server = wsgi.Server(bind_addr=("localhost", 8080), wsgi_app=application)
 server.start()
