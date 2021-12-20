@@ -57,6 +57,7 @@ flask_benchmarks = {
 }
 
 wsgi_benchmarks = {
+    "Cheroot": "results/cheroot_wsgi_results.txt",
     "Gunicorn": "results/gunicorn_wsgi_results.txt",
     "Uvicorn": "results/uvicorn_asgi_results.txt",
     "uWSGI": "results/basic_uwsgi_results.txt",
