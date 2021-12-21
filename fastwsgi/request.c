@@ -182,6 +182,8 @@ int on_message_complete(llhttp_t* parser) {
 
 void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* parser) {
     logger("building response");
+    Request* request = (Request*)parser->data;
+
     PyObject* iter;
 
     if (PyIter_Check(wsgi_response)) iter = wsgi_response;
@@ -201,9 +203,10 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     Py_DECREF(status);
 
     char* connection_header = "\r\nConnection: close";
-    if (llhttp_should_keep_alive(parser))
+    if (llhttp_should_keep_alive(parser)) {
         connection_header = "\r\nConnection: Keep-Alive";
-
+        request->state.keep_alive = 1;
+    }
     char* old_buf = buf;
     buf = malloc(strlen(old_buf) + strlen(connection_header));
     sprintf(buf, "%s%s", old_buf, connection_header);
@@ -254,8 +257,6 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
         sprintf(buf, "%s\r\n\r\n%s", old_buf, response_body);
         free(old_buf);
     }
-
-    Request* request = (Request*)parser->data;
 
     logger(buf);
     request->response_buffer.base = buf;

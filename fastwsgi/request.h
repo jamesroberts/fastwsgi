@@ -5,10 +5,15 @@
 #endif
 
 typedef struct {
+    int keep_alive;
+} RequestState;
+
+typedef struct {
     PyObject* headers;
     char remote_addr[17];
     llhttp_t parser;
     uv_buf_t response_buffer;
+    RequestState state;
 } Request;
 
 typedef struct {
