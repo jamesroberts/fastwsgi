@@ -10,6 +10,7 @@
 #include "constants.h"
 
 static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
+static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
 
 void logger(char* message) {
     if (LOGGING_ENABLED)
@@ -64,6 +65,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
 
     Request* request = malloc(sizeof(Request));
     request->state.keep_alive = 0;
+    request->state.error = 0;
     strcpy(request->remote_addr, client->remote_addr);
     client->parser.data = request;
     write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
@@ -72,12 +74,12 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
         if (err == HPE_OK) {
             logger("Successfully parsed");
-            if (request->response_buffer.len > 0) {
+            if (request->response_buffer.len > 0)
                 send_response(req, handle, request);
-            }
-            else {
+            else if (request->state.error)
+                send_error(req, handle, INTERNAL_ERROR);
+            else
                 send_error(req, handle, BAD_REQUEST);
-            }
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
@@ -96,9 +98,13 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         }
     }
     free(request);
+    llhttp_reset(&client->parser);
+    
     if (buf->base)
         free(buf->base);
-    llhttp_reset(&client->parser);
+    
+    if (PyErr_Occurred())
+        PyErr_Clear();
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {

@@ -5,6 +5,7 @@
 #endif
 
 typedef struct {
+    int error;
     int keep_alive;
 } RequestState;
 

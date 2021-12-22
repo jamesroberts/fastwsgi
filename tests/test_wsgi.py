@@ -7,6 +7,12 @@ def test_wsgi_get(wsgi_test_server):
     assert result.status_code == 200
     assert result.text == "OK"
 
+def test_wsgi_get_bytestring(wsgi_test_server):
+    url = f"{wsgi_test_server.endpoint}/get_byte_string"
+    result = requests.get(url)
+    assert result.status_code == 200
+    assert result.text == "basic byte string"
+
 
 def test_wsgi_post(wsgi_test_server):
     # Post with no data
