@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <uv.h>
+#include "uv.h"
 #include "llhttp.h"
 
 #include "server.h"
