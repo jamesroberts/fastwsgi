@@ -2,6 +2,7 @@
 #include "request.h"
 #include "llhttp.h"
 #include "constants.h"
+#include "start_response.h"
 
 static void reprint(PyObject* obj) {
     PyObject* repr = PyObject_Repr(obj);
@@ -121,74 +122,6 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     return 0;
 };
 
-void header_error(PyObject* object) {
-    const char* incorrect_type = Py_TYPE(object)->tp_name;
-    char* msg_template = "start_response argument 2 expects a list of 2-tuples, got '%s' instead.";
-    char* msg = malloc(strlen(msg_template) + strlen(incorrect_type) + 1);
-    sprintf(msg, msg_template, incorrect_type);
-    PyErr_Format(PyExc_TypeError, msg);
-    free(msg);
-};
-
-void exc_info_error(PyObject* object) {
-    const char* incorrect_type = Py_TYPE(object)->tp_name;
-    char* msg_template = "start_response argument 3 expects a 3-tuple, got '%s' instead.";
-    char* msg = malloc(strlen(msg_template) + strlen(incorrect_type) + 1);
-    sprintf(msg, msg_template, incorrect_type);
-    PyErr_Format(PyExc_TypeError, msg);
-    free(msg);
-};
-
-PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs) {
-    StartResponse* sr = (StartResponse*)self;
-
-    sr->exc_info = NULL;
-    if (!PyArg_UnpackTuple(args, "start_response", 2, 3, &sr->status, &sr->headers, &sr->exc_info)) {
-        printf("something went wrong\n");
-        return NULL;
-    }
-
-    if (sr->status != NULL) {
-        PyObject* status = PyUnicode_AsUTF8String(sr->status);
-        char* status_code = PyBytes_AS_STRING(status);
-        if (strlen(status_code) < 3) {
-            PyErr_SetString(PyExc_ValueError, "'status' must be a 3-digit string value");
-            Py_CLEAR(status);
-            return NULL;
-        }
-        Py_CLEAR(status);
-    }
-    else return NULL;
-
-    if (!PyList_Check(sr->headers)) {
-        header_error(sr->headers);
-        return NULL;
-    }
-
-    if (sr->exc_info && sr->exc_info != Py_None) {
-        if (!PyTuple_Check(sr->exc_info) || PyTuple_GET_SIZE(sr->exc_info) != 3) {
-            exc_info_error(sr->exc_info);
-            return NULL;
-        }
-    }
-
-    Py_XINCREF(sr->status);
-    Py_XINCREF(sr->headers);
-    Py_XINCREF(sr->exc_info);
-
-    Py_RETURN_NONE;
-}
-
-PyTypeObject StartResponse_Type = {
-    PyVarObject_HEAD_INIT(NULL, 0)
-    "start_response",
-    sizeof(StartResponse),
-    0,
-    (destructor)PyObject_FREE,
-    0, 0, 0, 0, 0, 0, 0, 0, 0,
-    start_response_call
-};
-
 int on_message_complete(llhttp_t* parser) {
     logger("on message complete");
     Request* request = (Request*)parser->data;
@@ -271,17 +204,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); i++) {
         PyObject* tuple = PyList_GET_ITEM(response->headers, i);
 
-        if (!PyTuple_Check(tuple) || PyTuple_GET_SIZE(tuple) != 2)
-            return header_error(tuple);
-
         PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
         PyObject* value = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 1));
-
-        if (field == NULL || value == NULL) {
-            Py_XDECREF(value);
-            Py_XDECREF(field);
-            return header_error(tuple);
-        }
 
         char* header_field = PyBytes_AS_STRING(field);
         char* header_value = PyBytes_AS_STRING(value);

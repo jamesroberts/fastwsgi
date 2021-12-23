@@ -4,6 +4,8 @@
 #define strcasecmp _stricmp
 #endif
 
+#include "start_response.h"
+
 typedef struct {
     int error;
     int keep_alive;
@@ -16,13 +18,6 @@ typedef struct {
     uv_buf_t response_buffer;
     RequestState state;
 } Request;
-
-typedef struct {
-    PyObject ob_base;
-    PyObject* status;
-    PyObject* headers;
-    PyObject* exc_info;
-} StartResponse;
 
 PyObject* base_dict;
 void init_request_dict();
