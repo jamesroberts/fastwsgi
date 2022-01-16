@@ -29,3 +29,9 @@ echo "Benchmarking ASGI Uvicorn"
 
 echo "Benchmarking uWSGI"
 ./benchmarks/benchmark_uwsgi.sh
+
+echo "Benchmarking Waitress"
+./benchmarks/benchmark_waitress.sh
+
+echo "Benchmarking Flask + Waitress"
+./benchmarks/benchmark_waitress_flask.sh

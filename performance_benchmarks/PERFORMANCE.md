@@ -2,7 +2,7 @@
 
 A set of "Hello World" benchmarks comparing FastWSGI's performance to other popular WSGI servers.
 
-All benchmarks were performed with [wrk](https://github.com/wg/wrk).
+All benchmarks were performed with [wrk](https://github.com/wg/wrk) on Ubuntu 20.04 with an Intel i9 9900k CPU.
 
 - 8 threads
 - 100 concurrent connections
@@ -27,7 +27,7 @@ cd performance_benchmarks/
 
 ## Simple WSGI application benchmarks
 
-This group of benchmarks were compares how a simple "Hello World" WSGI application performs with varying underlying WSGI servers. 
+This group of benchmarks compares how a simple "Hello World" WSGI application performs with varying underlying WSGI servers.
 
 ```python
 import fastwsgi

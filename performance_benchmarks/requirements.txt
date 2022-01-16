@@ -7,3 +7,4 @@ fastwsgi
 matplotlib
 uvicorn
 uwsgi
+waitress

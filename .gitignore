@@ -58,3 +58,5 @@ dist/
 *.egg-info/
 
 build/
+.cache/
+compile_commands.json
