@@ -13,7 +13,8 @@ from tests.apps_under_test import (
     wsgi_app,
     flask_app,
     validator_app,
-    start_response_app
+    start_response_app,
+    general_test_app
 )
 
 HOST = "127.0.0.1"
@@ -40,6 +41,7 @@ class Servers(Enum):
     FLASK_TEST_SERVER = 3
     VALIDATOR_TEST_SERVER = 4
     START_RESPONSE_SERVER = 5
+    GENERAL_TEST_APP = 6
 
 
 servers = {
@@ -48,6 +50,7 @@ servers = {
     Servers.FLASK_TEST_SERVER: flask_app,
     Servers.VALIDATOR_TEST_SERVER: validator_app,
     Servers.START_RESPONSE_SERVER: start_response_app,
+    Servers.GENERAL_TEST_APP: general_test_app,
 }
 
 
@@ -107,3 +110,8 @@ def validator_test_server():
 @pytest.fixture
 def start_response_server():
     return servers.get(Servers.START_RESPONSE_SERVER)
+
+
+@pytest.fixture
+def general_test_server():
+    return servers.get(Servers.GENERAL_TEST_APP)

@@ -163,6 +163,8 @@ int on_message_complete(llhttp_t* parser) {
 };
 
 void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* parser) {
+    // This function needs a clean up
+
     logger("building response");
     Request* request = (Request*)parser->data;
 
@@ -176,10 +178,16 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     else
         iter = PyObject_GetIter(wsgi_response);
 
-    if (result == NULL)
-        result = PyIter_Next(iter);
-
     int response_has_no_content = 0;
+
+    if (result == NULL) {
+        PyObject* next = PyIter_Next(iter);
+        if (next == NULL)
+            response_has_no_content = 1;
+        else
+            result = next;
+    }
+
     PyObject* status = PyUnicode_AsUTF8String(response->status);
     char* status_code = PyBytes_AS_STRING(status);
     if (strncmp(status_code, "204", 3) == 0 || strncmp(status_code, "304", 3) == 0) {
@@ -227,8 +235,8 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 
     if (response_has_no_content) {
         char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + 5);
-        sprintf(buf, "%s\r\n\r\n", old_buf);
+        buf = malloc(strlen(old_buf) + 26);
+        sprintf(buf, "%s\r\nContent-Length: 0\r\n\r\n", old_buf);
         free(old_buf);
     }
     else {
