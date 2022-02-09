@@ -12,6 +12,7 @@ PORT = 5000
 BACKLOG = 1024
 LOGGING = 0
 
+
 def run_multi_process_server(app):
     workers = []
     for _ in range(NUM_WORKERS):
@@ -83,5 +84,6 @@ def run_from_cli(host, port, wsgi_app_import_string, logging):
 def run(wsgi_app, host=HOST, port=PORT, backlog=1024):
     print_server_details(host, port)
     print(f"Server listening at http://{host}:{port}")
+    print(f"Running on PID:", os.getpid())
     _fastwsgi.run_server(wsgi_app, host, port, backlog, LOGGING)
     # run_multi_process_server(wsgi_app)

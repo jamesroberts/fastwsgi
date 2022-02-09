@@ -10,7 +10,7 @@ module = Extension(
     "_fastwsgi",
     sources=SOURCES,
     include_dirs=["llhttp/include", "libuv/include"],
-    extra_compile_args=["-O3", "-fno-strict-aliasing", "-fcommon"],
+    extra_compile_args=["-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall"],
 )
 
 with open("README.md", "r", encoding="utf-8") as read_me:

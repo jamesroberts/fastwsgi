@@ -168,25 +168,21 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     logger("building response");
     Request* request = (Request*)parser->data;
 
-    PyObject* iter = NULL;
+    PyObject* iterator = NULL;
     PyObject* result = NULL;
+    PyObject* item = NULL;
 
     if (PyBytes_Check(wsgi_response))
         result = wsgi_response;
-    else if (PyIter_Check(wsgi_response))
-        iter = wsgi_response;
-    else
-        iter = PyObject_GetIter(wsgi_response);
+    else {
+        iterator = PyObject_GetIter(wsgi_response);
+        result = PyBytes_FromString("");
+        while (item = PyIter_Next(iterator)) {
+            PyBytes_ConcatAndDel(&result, item);
+        }
+    }
 
     int response_has_no_content = 0;
-
-    if (result == NULL) {
-        PyObject* next = PyIter_Next(iter);
-        if (next == NULL)
-            response_has_no_content = 1;
-        else
-            result = next;
-    }
 
     PyObject* status = PyUnicode_AsUTF8String(response->status);
     char* status_code = PyBytes_AS_STRING(status);
@@ -259,15 +255,15 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     request->response_buffer.base = buf;
     request->response_buffer.len = strlen(buf);
 
-    if (iter != NULL && PyObject_HasAttrString(iter, "close")) {
-        PyObject* close = PyObject_GetAttrString(iter, "close");
+    if (iterator != NULL && PyObject_HasAttrString(iterator, "close")) {
+        PyObject* close = PyObject_GetAttrString(iterator, "close");
         if (close != NULL) {
             PyObject* close_result = PyObject_CallObject(close, NULL);
             Py_XDECREF(close_result);
         }
         Py_XDECREF(close);
     }
-    Py_XDECREF(iter);
+    Py_XDECREF(iterator);
     Py_XDECREF(result);
     result = NULL;
 }
