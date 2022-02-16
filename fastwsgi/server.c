@@ -23,7 +23,7 @@ void close_cb(uv_handle_t* handle) {
 }
 
 void shutdown_cb(uv_shutdown_t* req, int status) {
-    uv_handle_t* handle = (uv_handle_t*) req->handle;
+    uv_handle_t* handle = (uv_handle_t*)req->handle;
     if (!uv_is_closing(handle))
         uv_close(handle, close_cb);
     free(req);
@@ -99,10 +99,10 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     }
     free(request);
     llhttp_reset(&client->parser);
-    
+
     if (buf->base)
         free(buf->base);
-    
+
     if (PyErr_Occurred())
         PyErr_Clear();
 }

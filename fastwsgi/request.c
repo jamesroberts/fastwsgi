@@ -136,6 +136,7 @@ int on_message_complete(llhttp_t* parser) {
     build_wsgi_environ(parser);
 
     StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
+    start_response->called = 0;
 
     logger("calling wsgi application");
     PyObject* wsgi_response;
@@ -177,7 +178,7 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
     else {
         iterator = PyObject_GetIter(wsgi_response);
         result = PyBytes_FromString("");
-        while (item = PyIter_Next(iterator)) {
+        while ((item = PyIter_Next(iterator))) {
             PyBytes_ConcatAndDel(&result, item);
         }
     }

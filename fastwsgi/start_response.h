@@ -7,6 +7,7 @@ typedef struct {
     PyObject* status;
     PyObject* headers;
     PyObject* exc_info;
+    int called;
 } StartResponse;
 
 PyTypeObject StartResponse_Type;
