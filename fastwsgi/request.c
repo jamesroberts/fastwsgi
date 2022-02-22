@@ -294,7 +294,6 @@ void init_request_dict() {
     PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
     PyDict_SetItem(base_dict, SERVER_NAME, server_host);
     PyDict_SetItem(base_dict, SERVER_PORT, server_port);
-    PyDict_SetItem(base_dict, QUERY_STRING, empty_string);
     PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);
     PyDict_SetItem(base_dict, wsgi_version, version);
     PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);
