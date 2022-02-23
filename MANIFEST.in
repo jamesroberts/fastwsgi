@@ -1,7 +1,10 @@
 include llhttp/include/*.h
 include llhttp/src/*.c
 include llhttp/src/*.h
+include libuv/include/*.h
 include libuv/include/*/*.h
+include libuv/src/*.c
+include libuv/src/*.h
 include libuv/src/*/*.c
 include libuv/src/*/*.h
 include fastwsgi/*.c
