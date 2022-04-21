@@ -2,9 +2,13 @@ def _no_response(environ, start_response):
     start_response("200 OK", [])
     return []
 
+def _invalid_return_type(environ, start_response):
+    start_response("200 OK", [])
+    return "non-bytestring"
 
 routes = {
     "/no_response": _no_response,
+    "/invalid_return_type": _invalid_return_type,
 }
 
 

@@ -122,6 +122,52 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     return 0;
 };
 
+void set_type_error(char* type) {
+    PyErr_Format(
+        PyExc_TypeError, "response type should be bytes or a byte iterator, got '%s'", type
+    );
+}
+
+void close_iterator(PyObject* iterator) {
+    if (iterator != NULL && PyObject_HasAttrString(iterator, "close")) {
+        PyObject* close = PyObject_GetAttrString(iterator, "close");
+        if (close != NULL) {
+            PyObject* close_result = PyObject_CallObject(close, NULL);
+            Py_XDECREF(close_result);
+        }
+        Py_XDECREF(close);
+    }
+}
+
+PyObject* extract_response(PyObject* wsgi_response) {
+    PyObject* iterator = NULL;
+    PyObject* response = NULL;
+    PyObject* item = NULL;
+
+    if (PyBytes_CheckExact(wsgi_response)) {
+        return wsgi_response;
+    }
+
+    iterator = PyObject_GetIter(wsgi_response);
+    if (iterator != NULL && PyIter_Check(iterator)) {
+        response = PyBytes_FromString("");
+        while ((item = PyIter_Next(iterator))) {
+            if (!PyBytes_CheckExact(item)) {
+                Py_DECREF(response);
+                response = NULL;
+                break;
+            }
+            PyBytes_ConcatAndDel(&response, item);
+        }
+        close_iterator(iterator);
+        Py_XDECREF(iterator);
+    }
+    if (response == NULL) {
+        set_type_error(Py_TYPE(wsgi_response)->tp_name);    
+    }
+    return response;
+}
+
 int on_message_complete(llhttp_t* parser) {
     logger("on message complete");
     Request* request = (Request*)parser->data;
@@ -145,9 +191,20 @@ int on_message_complete(llhttp_t* parser) {
     );
     logger("called wsgi application");
 
-    if (wsgi_response != NULL)
-        build_response(wsgi_response, start_response, parser);
+    if (PyErr_Occurred()) {
+        request->state.error = 1;
+        PyErr_Print();
+    }
 
+    if (request->state.error == 0) {
+        PyObject* response_body = extract_response(wsgi_response);
+        if (response_body != NULL) {
+            build_response(response_body, start_response, parser);
+        }
+        Py_CLEAR(response_body);
+    }
+
+    // FIXME: Try to not repeat this block in this method
     if (PyErr_Occurred()) {
         request->state.error = 1;
         PyErr_Print();
@@ -163,25 +220,11 @@ int on_message_complete(llhttp_t* parser) {
     return 0;
 };
 
-void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* parser) {
+void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
     // This function needs a clean up
 
     logger("building response");
     Request* request = (Request*)parser->data;
-
-    PyObject* iterator = NULL;
-    PyObject* result = NULL;
-    PyObject* item = NULL;
-
-    if (PyBytes_Check(wsgi_response))
-        result = wsgi_response;
-    else {
-        iterator = PyObject_GetIter(wsgi_response);
-        result = PyBytes_FromString("");
-        while ((item = PyIter_Next(iterator))) {
-            PyBytes_ConcatAndDel(&result, item);
-        }
-    }
 
     int response_has_no_content = 0;
 
@@ -237,36 +280,24 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
         free(old_buf);
     }
     else {
-        char* response_body = PyBytes_AS_STRING(result);
+        char* response_body_str = PyBytes_AS_STRING(response_body);
 
         if (content_length_header_present == 0) {
             char* old_buf = buf;
             buf = malloc(strlen(old_buf) + 32);
-            sprintf(buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body));
+            sprintf(buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body_str));
             free(old_buf);
         }
 
         char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + strlen(response_body) + 5);
-        sprintf(buf, "%s\r\n\r\n%s", old_buf, response_body);
+        buf = malloc(strlen(old_buf) + strlen(response_body_str) + 5);
+        sprintf(buf, "%s\r\n\r\n%s", old_buf, response_body_str);
         free(old_buf);
     }
 
     logger(buf);
     request->response_buffer.base = buf;
     request->response_buffer.len = strlen(buf);
-
-    if (iterator != NULL && PyObject_HasAttrString(iterator, "close")) {
-        PyObject* close = PyObject_GetAttrString(iterator, "close");
-        if (close != NULL) {
-            PyObject* close_result = PyObject_CallObject(close, NULL);
-            Py_XDECREF(close_result);
-        }
-        Py_XDECREF(close);
-    }
-    Py_XDECREF(iterator);
-    Py_XDECREF(result);
-    result = NULL;
 }
 
 
