@@ -1,12 +1,7 @@
-import os
-import sys
 import glob
 from setuptools import setup
 from distutils.core import Extension
 from setup_libuv import build_libuv
-
-if "linux" in sys.platform:
-    os.environ['CC'] = 'ccache clang-11'
 
 SOURCES = glob.glob("fastwsgi/*.c") + glob.glob("llhttp/src/*.c")
 
