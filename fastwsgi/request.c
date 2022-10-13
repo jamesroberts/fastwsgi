@@ -39,8 +39,34 @@ static void set_header(PyObject* headers, const char* key, const char* value, si
 int on_message_begin(llhttp_t* parser) {
     logger("on message begin");
     Request* request = (Request*)parser->data;
-    request->headers = PyDict_Copy(base_dict);
+    request->state.keep_alive = 0;
+    request->state.error = 0;
+    if (request->response_buffer.base)
+        free(request->response_buffer.base);
+    request->response_buffer.base = NULL;
     request->response_buffer.len = 0;
+    if (request->headers == NULL) {
+        PyObject* headers = PyDict_Copy(base_dict);
+        // Sets up base request dict for new incoming requests
+        // https://www.python.org/dev/peps/pep-3333/#specification-details
+        PyObject* io = PyImport_ImportModule("io");
+        PyObject* BytesIO = PyUnicode_FromString("BytesIO");
+        PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
+        PyDict_SetItem(headers, wsgi_input, io_BytesIO);
+        request->headers = headers;
+        Py_DECREF(BytesIO);
+        Py_DECREF(io);
+    } else {
+        PyObject* input = PyDict_GetItem(request->headers, wsgi_input);
+        PyObject* truncate = PyUnicode_FromString("truncate");
+        PyObject* result1 = PyObject_CallMethodObjArgs(input, truncate, PyLong_FromLong(0L), NULL);
+        Py_DECREF(truncate);
+        Py_DECREF(result1);
+        PyObject* seek = PyUnicode_FromString("seek");
+        PyObject* result2 = PyObject_CallMethodObjArgs(input, seek, PyLong_FromLong(0L), NULL);
+        Py_DECREF(seek);
+        Py_DECREF(result2);
+    }
     return 0;
 };
 
@@ -315,17 +341,12 @@ void build_wsgi_environ(llhttp_t* parser) {
 }
 
 void init_request_dict() {
-    // Sets up base request dict for new incoming requests
-    // https://www.python.org/dev/peps/pep-3333/#specification-details
-    PyObject* io = PyImport_ImportModule("io");
-    PyObject* BytesIO = PyUnicode_FromString("BytesIO");
-    PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
-
+    // only constant values!!!
     base_dict = PyDict_New();
     PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
     PyDict_SetItem(base_dict, SERVER_NAME, server_host);
     PyDict_SetItem(base_dict, SERVER_PORT, server_port);
-    PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);
+    //PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);   // not const!!!
     PyDict_SetItem(base_dict, wsgi_version, version);
     PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);
     PyDict_SetItem(base_dict, wsgi_errors, PySys_GetObject("stderr"));

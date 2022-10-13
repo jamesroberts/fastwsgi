@@ -68,7 +68,7 @@ void send_response(write_req_t* req, uv_stream_t* handle, Request* request) {
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t* client = (client_t*)handle->data;
 
-    Request* request = malloc(sizeof(Request));
+    Request* request = calloc(1, sizeof(Request));
     request->state.keep_alive = 0;
     request->state.error = 0;
     strcpy(request->remote_addr, client->remote_addr);
