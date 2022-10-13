@@ -20,6 +20,10 @@ void logger(char* message) {
 
 void close_cb(uv_handle_t* handle) {
     logger("disconnected");
+    Request * request = (Request *)handle->data;
+    Py_XDECREF(request->headers);
+    if (request->response_buffer.base)
+        free(request->response_buffer.base);
     free(handle);
 }
 
