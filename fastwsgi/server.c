@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "uv.h"
+#include "uv-common.h"
 #include "llhttp.h"
 
 #include "server.h"
@@ -165,8 +166,12 @@ int main() {
     uv_fileno((const uv_handle_t*)&server, &file_descriptor);
 
     int enabled = 1;
-    int so_reuseport = 15;
-    setsockopt(file_descriptor, SOL_SOCKET, so_reuseport, &enabled, sizeof(&enabled));
+#ifdef _WIN32
+    //uv__socket_sockopt((uv_handle_t*)&server, SO_REUSEADDR, &enabled);
+#else
+    int so_reuseport = 15;  // SO_REUSEPORT
+    uv__socket_sockopt((uv_handle_t*)&server, so_reuseport, &enabled);
+#endif
 
     int err = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
     if (err) {
