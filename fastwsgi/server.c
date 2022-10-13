@@ -31,11 +31,11 @@ void logger(char* message) {
 
 void close_cb(uv_handle_t* handle) {
     logger("disconnected");
-    Request * request = (Request *)handle->data;
-    Py_XDECREF(request->headers);
-    if (request->response_buffer.base)
-        free(request->response_buffer.base);
-    free(handle);
+    client_t * client = (client_t *)handle->data;
+    Py_XDECREF(client->request.headers);
+    if (client->response.buffer.base)
+        free(client->response.buffer.base);
+    free(client);
 }
 
 void shutdown_cb(uv_shutdown_t* req, int status) {
@@ -67,38 +67,36 @@ void send_error(write_req_t* req, uv_stream_t* handle, const char* error_string)
     close_connection(handle);
 }
 
-void send_response(write_req_t* req, uv_stream_t* handle, Request* request) {
-    uv_buf_t response = request->response_buffer;
-    req->buf = uv_buf_init(response.base, response.len);
+void send_response(write_req_t* req, uv_stream_t* handle, client_t* client) {
+    uv_buf_t * resbuf = &client->response.buffer;
+    req->buf = uv_buf_init(resbuf->base, resbuf->len);
     uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
-    if (!request->state.keep_alive)
+    if (!client->request.state.keep_alive)
         close_connection(handle);
 }
 
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t* client = (client_t*)handle->data;
+    llhttp_t * parser = &client->request.parser;
 
-    Request* request = calloc(1, sizeof(Request));
-    request->state.keep_alive = 0;
-    request->state.error = 0;
-    strcpy(request->remote_addr, client->remote_addr);
-    client->parser.data = request;
+    client->request.state.keep_alive = 0;
+    client->request.state.error = 0;
     write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
 
     if (nread > 0) {
-        enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
+        enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
             logger("Successfully parsed");
-            if (request->response_buffer.len > 0)
-                send_response(req, handle, request);
-            else if (request->state.error)
+            if (client->response.buffer.len > 0)
+                send_response(req, handle, client);
+            else if (client->request.state.error)
                 send_error(req, handle, INTERNAL_ERROR);
             else
                 send_error(req, handle, BAD_REQUEST);
         }
         else {
-            fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
+            fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
             send_error(req, handle, BAD_REQUEST);
         }
     }
@@ -113,8 +111,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
             close_connection(handle);
         }
     }
-    free(request);
-    llhttp_reset(&client->parser);
+    llhttp_reset(parser);
 
     if (buf->base)
         free(buf->base);
@@ -135,7 +132,7 @@ void connection_cb(uv_stream_t* server, int status) {
         return;
     }
 
-    client_t* client = malloc(sizeof(client_t));
+    client_t* client = calloc(1, sizeof(client_t));
 
     uv_tcp_init(loop, &client->handle);
     uv_tcp_nodelay(&client->handle, 0);
@@ -151,7 +148,8 @@ void connection_cb(uv_stream_t* server, int status) {
     client->handle.data = client;
 
     if (uv_accept(server, (uv_stream_t*)&client->handle) == 0) {
-        llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
+        llhttp_init(&client->request.parser, HTTP_REQUEST, &parser_settings);
+        client->request.parser.data = client;
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
     }
     else {

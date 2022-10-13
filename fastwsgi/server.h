@@ -3,6 +3,7 @@
 
 #include <Python.h>
 #include "uv.h"
+#include "uv-common.h"
 #include "llhttp.h"
 #include "request.h"
 
@@ -15,9 +16,22 @@ typedef struct {
 } write_req_t;
 
 typedef struct {
-    uv_tcp_t handle;
-    llhttp_t parser;
-    char remote_addr[17];
+    int error;
+    int keep_alive;
+} RequestState;
+
+typedef struct {
+    uv_tcp_t handle;     // peer connection
+    char remote_addr[24];
+    struct {
+        PyObject* headers;
+        char* current_header;
+        llhttp_t parser;
+        RequestState state;
+    } request;
+    struct {
+        uv_buf_t buffer;
+    } response;
 } client_t;
 
 PyObject* run_server(PyObject* self, PyObject* args);
