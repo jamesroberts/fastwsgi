@@ -77,11 +77,10 @@ void send_response(write_req_t* req, uv_stream_t* handle, client_t* client) {
 
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
+    int continue_read = 0;
     client_t* client = (client_t*)handle->data;
     llhttp_t * parser = &client->request.parser;
 
-    client->request.state.keep_alive = 0;
-    client->request.state.error = 0;
     write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
 
     if (nread > 0) {
@@ -93,7 +92,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
             else if (client->request.state.error)
                 send_error(req, handle, INTERNAL_ERROR);
             else
-                send_error(req, handle, BAD_REQUEST);
+                continue_read = 1;
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
@@ -111,7 +110,6 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
             close_connection(handle);
         }
     }
-    llhttp_reset(parser);
 
     if (buf->base)
         free(buf->base);
