@@ -17,7 +17,8 @@ static void reprint(PyObject* obj) {
 
 static void set_header(PyObject* headers, const char* key, const char* value, size_t length) {
     logger("setting header");
-    PyObject* item = PyUnicode_FromStringAndSize(value, length);
+    int vlen = (length > 0) ? (int)length : (int)strlen(value);
+    PyObject* item = PyUnicode_FromStringAndSize(value, vlen);
 
     PyObject* existing_item = PyDict_GetItemString(headers, key);
     if (existing_item) {
@@ -335,11 +336,10 @@ void build_wsgi_environ(llhttp_t* parser) {
     PyObject * headers = client->request.headers;
 
     const char* method = llhttp_method_name(parser->method);
+    set_header(headers, "REQUEST_METHOD", method, 0);
     const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
-
-    set_header(headers, "REQUEST_METHOD", method, strlen(method));
-    set_header(headers, "SERVER_PROTOCOL", protocol, strlen(protocol));
-    set_header(headers, "REMOTE_ADDR", client->remote_addr, strlen(client->remote_addr));
+    set_header(headers, "SERVER_PROTOCOL", protocol, 0);
+    set_header(headers, "REMOTE_ADDR", client->remote_addr, 0);
 }
 
 void init_request_dict() {
