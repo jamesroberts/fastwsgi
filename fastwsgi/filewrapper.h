@@ -1,3 +1,6 @@
+#ifndef FASTWSGI_FILEWRAPPER_H_
+#define FASTWSGI_FILEWRAPPER_H_
+
 #include <Python.h>
 
 typedef struct {
@@ -11,3 +14,5 @@ PyTypeObject FileWrapper_Type;
 #define FileWrapper_CheckExact(object) ((object)->ob_type == &FileWrapper_Type)
 
 void FileWrapper_Init(void);
+
+#endif

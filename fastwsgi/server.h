@@ -1,18 +1,13 @@
+#ifndef FASTWSGI_SERVER_H_
+#define FASTWSGI_SERVER_H_
+
 #include <Python.h>
 #include "uv.h"
 #include "llhttp.h"
+#include "request.h"
 
-PyObject* wsgi_app;
-char* host;
-int port;
-int backlog;
+extern PyObject* wsgi_app;
 
-uv_tcp_t server;
-uv_buf_t response_buf;
-uv_loop_t* loop;
-uv_os_fd_t file_descriptor;
-
-struct sockaddr_in addr;
 
 typedef struct {
     uv_write_t req;
@@ -29,3 +24,5 @@ PyObject* run_server(PyObject* self, PyObject* args);
 
 int LOGGING_ENABLED;
 void logger(char* message);
+
+#endif

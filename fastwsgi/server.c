@@ -10,6 +10,17 @@
 #include "request.h"
 #include "constants.h"
 
+PyObject* wsgi_app;
+char* host;
+int port;
+int backlog;
+
+uv_tcp_t server;
+uv_loop_t* loop;
+uv_os_fd_t file_descriptor;
+
+struct sockaddr_in addr;
+
 static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
 static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
 
