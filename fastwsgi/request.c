@@ -14,7 +14,7 @@ void logrepr(int level, PyObject* obj) {
 }
 
 static void set_header(PyObject* headers, const char* key, const char* value, size_t length) {
-    logger("setting header");
+    LOGi("setting header");
     int vlen = (length > 0) ? (int)length : (int)strlen(value);
     PyObject* item = PyUnicode_FromStringAndSize(value, vlen);
 
@@ -36,7 +36,7 @@ static void set_header(PyObject* headers, const char* key, const char* value, si
 }
 
 int on_message_begin(llhttp_t* parser) {
-    logger("on message begin");
+    LOGi("on message begin");
     client_t * client = (client_t *)parser->data;
     client->request.state.keep_alive = 0;
     client->request.state.error = 0;
@@ -70,7 +70,7 @@ int on_message_begin(llhttp_t* parser) {
 };
 
 int on_url(llhttp_t* parser, const char* data, size_t length) {
-    logger("on url");
+    LOGi("on url");
     client_t * client = (client_t *)parser->data;
 
     char* url = malloc(length + 1);
@@ -89,13 +89,14 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
 };
 
 int on_body(llhttp_t* parser, const char* body, size_t length) {
-    logger("on body");
+    LOGi("on body (len = %d)", (int)length);
     client_t * client = (client_t *)parser->data;
 
     PyObject* input = PyDict_GetItem(client->request.headers, wsgi_input);
 
     PyObject* write = PyUnicode_FromString("write");
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
+    LOGREPR(LL_TRACE, body_content);
     PyObject* result = PyObject_CallMethodObjArgs(input, write, body_content, NULL);
     Py_DECREF(write);
     Py_XDECREF(result);
@@ -105,7 +106,7 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
 };
 
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
-    logger("on header field");
+    LOGi("on header field");
     client_t * client = (client_t *)parser->data;
 
     char* upperHeader = malloc(length + 1);
@@ -140,7 +141,7 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
 };
 
 int on_header_value(llhttp_t* parser, const char* value, size_t length) {
-    logger("on header value");
+    LOGi("on header value");
     client_t * client = (client_t *)parser->data;
     if (client->request.current_header != NULL) {
         set_header(client->request.headers, client->request.current_header, value, length);
@@ -148,7 +149,7 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     return 0;
 };
 
-void set_type_error(char* type) {
+void set_type_error(const char* type) {
     PyErr_Format(
         PyExc_TypeError, "response type should be bytes or a byte iterator, got '%s'", type
     );
@@ -195,7 +196,7 @@ PyObject* extract_response(PyObject* wsgi_response) {
 }
 
 int on_message_complete(llhttp_t* parser) {
-    logger("on message complete");
+    LOGi("on message complete");
     client_t * client = (client_t *)parser->data;
     PyObject * headers = client->request.headers;
 
@@ -211,12 +212,12 @@ int on_message_complete(llhttp_t* parser) {
     StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
     start_response->called = 0;
 
-    logger("calling wsgi application");
+    LOGi("calling wsgi application");
     PyObject* wsgi_response;
     wsgi_response = PyObject_CallFunctionObjArgs(
         wsgi_app, headers, start_response, NULL
     );
-    logger("called wsgi application");
+    LOGi("called wsgi application");
 
     if (PyErr_Occurred()) {
         client->request.state.error = 1;
@@ -250,7 +251,7 @@ int on_message_complete(llhttp_t* parser) {
 void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
     // This function needs a clean up
 
-    logger("building response");
+    LOGi("building response");
     client_t * client = (client_t *)parser->data;
 
     int response_has_no_content = 0;
@@ -297,7 +298,7 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
         Py_DECREF(field);
         Py_DECREF(value);
 
-        logger("added header");
+        LOGi("added header");
     }
 
     if (response_has_no_content) {
@@ -322,14 +323,14 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
         free(old_buf);
     }
 
-    logger(buf);
+    LOGd(buf);
     client->response.buffer.base = buf;
     client->response.buffer.len = strlen(buf);
 }
 
 
 void build_wsgi_environ(llhttp_t* parser) {
-    logger("building wsgi environ");
+    LOGi("building wsgi environ");
     client_t * client = (client_t *)parser->data;
     PyObject * headers = client->request.headers;
 

@@ -26,7 +26,7 @@ static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n"
 
 
 void close_cb(uv_handle_t* handle) {
-    logger("disconnected");
+    LOGi("disconnected");
     client_t * client = (client_t *)handle->data;
     Py_XDECREF(client->request.headers);
     if (client->response.buffer.base)
@@ -50,9 +50,7 @@ void shutdown_connection(uv_stream_t* handle) {
 }
 
 void write_cb(uv_write_t* req, int status) {
-    if (status) {
-        fprintf(stderr, "Write error %s\n", uv_strerror(status));
-    }
+    LOGe_IF(status, "Write error %s\n", uv_strerror(status));
     //write_req_t* write_req = (write_req_t*)req;
     free(req);
 }
@@ -69,12 +67,14 @@ void stream_write(uv_stream_t* handle, const void* data, size_t size) {
 }
 
 void send_error(uv_stream_t* handle, const char* error_string) {
+    LOGe("%.25s", error_string);
     stream_write(handle, error_string, strlen(error_string));
     shutdown_connection(handle);   // fixme: maybe check keep_alive???
 }
 
 void send_response(uv_stream_t* handle, client_t* client) {
     uv_buf_t * resbuf = &client->response.buffer;
+    LOGi("send_response %d bytes", resbuf->len);
     stream_write(handle, resbuf->base, resbuf->len);
     if (!client->request.state.keep_alive)
         shutdown_connection(handle);
@@ -89,7 +89,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     if (nread > 0) {
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
-            logger("Successfully parsed");
+            LOGi("Successfully parsed (response len = %d)", client->response.buffer.len);
             if (client->response.buffer.len > 0)
                 send_response(handle, client);
             else if (client->request.state.error)
@@ -98,7 +98,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
                 continue_read = 1;
         }
         else {
-            fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
+            LOGe("Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
             send_error(handle, BAD_REQUEST);
         }
     }
@@ -109,7 +109,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
             close_connection(handle);
         } else {
             if (nread != UV_ECONNRESET)
-                fprintf(stderr, "Read error %s\n", uv_err_name(nread));
+                LOGe("Read error %s\n", uv_err_name(nread));
             shutdown_connection(handle);
         }
     }
@@ -122,14 +122,14 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    logger("Allocating buffer");
+    LOGi("Allocating buffer (size = %d)", (int)suggested_size);
     buf->base = (char*)malloc(suggested_size);
     buf->len = suggested_size;
 }
 
 void connection_cb(uv_stream_t* server, int status) {
     if (status < 0) {
-        fprintf(stderr, "Connection error %s\n", uv_strerror(status));
+        LOGe("Connection error %s\n", uv_strerror(status));
         return;
     }
 
@@ -189,13 +189,13 @@ int main() {
 
     int err = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
     if (err) {
-        fprintf(stderr, "Bind error %s\n", uv_strerror(err));
+        LOGe("Bind error %s\n", uv_strerror(err));
         return 1;
     }
 
     err = uv_listen((uv_stream_t*)&server, backlog, connection_cb);
     if (err) {
-        fprintf(stderr, "Listen error %s\n", uv_strerror(err));
+        LOGe("Listen error %s\n", uv_strerror(err));
         return 1;
     }
 
