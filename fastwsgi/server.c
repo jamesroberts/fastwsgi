@@ -3,11 +3,23 @@
 #include <string.h>
 
 #include "uv.h"
+#include "uv-common.h"
 #include "llhttp.h"
 
 #include "server.h"
 #include "request.h"
 #include "constants.h"
+
+PyObject* wsgi_app;
+char* host;
+int port;
+int backlog;
+
+uv_tcp_t server;
+uv_loop_t* loop;
+uv_os_fd_t file_descriptor;
+
+struct sockaddr_in addr;
 
 static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
 static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
@@ -19,17 +31,24 @@ void logger(char* message) {
 
 void close_cb(uv_handle_t* handle) {
     logger("disconnected");
-    free(handle);
-}
-
-void shutdown_cb(uv_shutdown_t* req, int status) {
-    uv_handle_t* handle = (uv_handle_t*)req->handle;
-    if (!uv_is_closing(handle))
-        uv_close(handle, close_cb);
-    free(req);
+    client_t * client = (client_t *)handle->data;
+    Py_XDECREF(client->request.headers);
+    if (client->response.buffer.base)
+        free(client->response.buffer.base);
+    free(client);
 }
 
 void close_connection(uv_stream_t* handle) {
+    if (!uv_is_closing((uv_handle_t*)handle))
+        uv_close((uv_handle_t*)handle, close_cb);
+}
+
+void shutdown_cb(uv_shutdown_t* req, int status) {
+    close_connection(req->handle);
+    free(req);
+}
+
+void shutdown_connection(uv_stream_t* handle) {
     uv_shutdown_t* shutdown = malloc(sizeof(uv_shutdown_t));
     uv_shutdown(shutdown, handle, shutdown_cb);
 }
@@ -38,67 +57,66 @@ void write_cb(uv_write_t* req, int status) {
     if (status) {
         fprintf(stderr, "Write error %s\n", uv_strerror(status));
     }
-    write_req_t* write_req = (write_req_t*)req;
-    free(write_req->buf.base);
-    free(write_req);
+    //write_req_t* write_req = (write_req_t*)req;
+    free(req);
 }
 
-void send_error(write_req_t* req, uv_stream_t* handle, const char* error_string) {
-    char* error = malloc(strlen(error_string) + 1);
-    strcpy(error, error_string);
-    req->buf = uv_buf_init(error, strlen(error));
+void stream_write(uv_stream_t* handle, const void* data, size_t size) {
+    if (!data || size == 0)
+        return;
+    size_t req_size = _Py_SIZE_ROUND_UP(sizeof(write_req_t), 16);
+    write_req_t* req = (write_req_t*)malloc(req_size + size);
+    req->buf.base = (char *)req + req_size;
+    req->buf.len = size;
+    memcpy(req->buf.base, data, size);
     uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
-    close_connection(handle);
 }
 
-void send_response(write_req_t* req, uv_stream_t* handle, Request* request) {
-    uv_buf_t response = request->response_buffer;
-    req->buf = uv_buf_init(response.base, response.len);
-    uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
-    if (!request->state.keep_alive)
-        close_connection(handle);
+void send_error(uv_stream_t* handle, const char* error_string) {
+    stream_write(handle, error_string, strlen(error_string));
+    shutdown_connection(handle);   // fixme: maybe check keep_alive???
+}
+
+void send_response(uv_stream_t* handle, client_t* client) {
+    uv_buf_t * resbuf = &client->response.buffer;
+    stream_write(handle, resbuf->base, resbuf->len);
+    if (!client->request.state.keep_alive)
+        shutdown_connection(handle);
 }
 
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
+    int continue_read = 0;
     client_t* client = (client_t*)handle->data;
-
-    Request* request = malloc(sizeof(Request));
-    request->state.keep_alive = 0;
-    request->state.error = 0;
-    strcpy(request->remote_addr, client->remote_addr);
-    client->parser.data = request;
-    write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
+    llhttp_t * parser = &client->request.parser;
 
     if (nread > 0) {
-        enum llhttp_errno err = llhttp_execute(&client->parser, buf->base, nread);
+        enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
             logger("Successfully parsed");
-            if (request->response_buffer.len > 0)
-                send_response(req, handle, request);
-            else if (request->state.error)
-                send_error(req, handle, INTERNAL_ERROR);
+            if (client->response.buffer.len > 0)
+                send_response(handle, client);
+            else if (client->request.state.error)
+                send_error(handle, INTERNAL_ERROR);
             else
-                send_error(req, handle, BAD_REQUEST);
+                continue_read = 1;
         }
         else {
-            fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->parser.reason);
-            send_error(req, handle, BAD_REQUEST);
+            fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
+            send_error(handle, BAD_REQUEST);
         }
     }
     if (nread < 0) {
         uv_read_stop(handle);
 
-        if (nread == UV_ECONNRESET) {
+        if (nread == UV_EOF) {  // remote peer disconnected
             close_connection(handle);
-        }
-        else if (nread != UV_EOF) {
-            fprintf(stderr, "Read error %s\n", uv_err_name(nread));
-            close_connection(handle);
+        } else {
+            if (nread != UV_ECONNRESET)
+                fprintf(stderr, "Read error %s\n", uv_err_name(nread));
+            shutdown_connection(handle);
         }
     }
-    free(request);
-    llhttp_reset(&client->parser);
 
     if (buf->base)
         free(buf->base);
@@ -119,7 +137,7 @@ void connection_cb(uv_stream_t* server, int status) {
         return;
     }
 
-    client_t* client = malloc(sizeof(client_t));
+    client_t* client = calloc(1, sizeof(client_t));
 
     uv_tcp_init(loop, &client->handle);
     uv_tcp_nodelay(&client->handle, 0);
@@ -135,7 +153,8 @@ void connection_cb(uv_stream_t* server, int status) {
     client->handle.data = client;
 
     if (uv_accept(server, (uv_stream_t*)&client->handle) == 0) {
-        llhttp_init(&client->parser, HTTP_REQUEST, &parser_settings);
+        llhttp_init(&client->request.parser, HTTP_REQUEST, &parser_settings);
+        client->request.parser.data = client;
         uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
     }
     else {
@@ -165,8 +184,12 @@ int main() {
     uv_fileno((const uv_handle_t*)&server, &file_descriptor);
 
     int enabled = 1;
-    int so_reuseport = 15;
-    setsockopt(file_descriptor, SOL_SOCKET, so_reuseport, &enabled, sizeof(&enabled));
+#ifdef _WIN32
+    //uv__socket_sockopt((uv_handle_t*)&server, SO_REUSEADDR, &enabled);
+#else
+    int so_reuseport = 15;  // SO_REUSEPORT
+    uv__socket_sockopt((uv_handle_t*)&server, so_reuseport, &enabled);
+#endif
 
     int err = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
     if (err) {

@@ -17,7 +17,8 @@ static void reprint(PyObject* obj) {
 
 static void set_header(PyObject* headers, const char* key, const char* value, size_t length) {
     logger("setting header");
-    PyObject* item = PyUnicode_FromStringAndSize(value, length);
+    int vlen = (length > 0) ? (int)length : (int)strlen(value);
+    PyObject* item = PyUnicode_FromStringAndSize(value, vlen);
 
     PyObject* existing_item = PyDict_GetItemString(headers, key);
     if (existing_item) {
@@ -38,15 +39,41 @@ static void set_header(PyObject* headers, const char* key, const char* value, si
 
 int on_message_begin(llhttp_t* parser) {
     logger("on message begin");
-    Request* request = (Request*)parser->data;
-    request->headers = PyDict_Copy(base_dict);
-    request->response_buffer.len = 0;
+    client_t * client = (client_t *)parser->data;
+    client->request.state.keep_alive = 0;
+    client->request.state.error = 0;
+    if (client->response.buffer.base)
+        free(client->response.buffer.base);
+    client->response.buffer.base = NULL;
+    client->response.buffer.len = 0;
+    if (client->request.headers == NULL) {
+        PyObject* headers = PyDict_Copy(base_dict);
+        // Sets up base request dict for new incoming requests
+        // https://www.python.org/dev/peps/pep-3333/#specification-details
+        PyObject* io = PyImport_ImportModule("io");
+        PyObject* BytesIO = PyUnicode_FromString("BytesIO");
+        PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
+        PyDict_SetItem(headers, wsgi_input, io_BytesIO);
+        client->request.headers = headers;
+        Py_DECREF(BytesIO);
+        Py_DECREF(io);
+    } else {
+        PyObject* input = PyDict_GetItem(client->request.headers, wsgi_input);
+        PyObject* truncate = PyUnicode_FromString("truncate");
+        PyObject* result1 = PyObject_CallMethodObjArgs(input, truncate, PyLong_FromLong(0L), NULL);
+        Py_DECREF(truncate);
+        Py_DECREF(result1);
+        PyObject* seek = PyUnicode_FromString("seek");
+        PyObject* result2 = PyObject_CallMethodObjArgs(input, seek, PyLong_FromLong(0L), NULL);
+        Py_DECREF(seek);
+        Py_DECREF(result2);
+    }
     return 0;
 };
 
 int on_url(llhttp_t* parser, const char* data, size_t length) {
     logger("on url");
-    Request* request = (Request*)parser->data;
+    client_t * client = (client_t *)parser->data;
 
     char* url = malloc(length + 1);
     strncpy(url, data, length);
@@ -55,9 +82,9 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
     char* query_string = strchr(url, '?');
     if (query_string) {
         *query_string = 0;
-        set_header(request->headers, "QUERY_STRING", query_string + 1, strlen(query_string + 1));
+        set_header(client->request.headers, "QUERY_STRING", query_string + 1, strlen(query_string + 1));
     }
-    set_header(request->headers, "PATH_INFO", url, strlen(url));
+    set_header(client->request.headers, "PATH_INFO", url, strlen(url));
 
     free(url);
     return 0;
@@ -65,9 +92,9 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
 
 int on_body(llhttp_t* parser, const char* body, size_t length) {
     logger("on body");
-    Request* request = (Request*)parser->data;
+    client_t * client = (client_t *)parser->data;
 
-    PyObject* input = PyDict_GetItem(request->headers, wsgi_input);
+    PyObject* input = PyDict_GetItem(client->request.headers, wsgi_input);
 
     PyObject* write = PyUnicode_FromString("write");
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
@@ -81,12 +108,13 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
 
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     logger("on header field");
+    client_t * client = (client_t *)parser->data;
 
     char* upperHeader = malloc(length + 1);
     for (size_t i = 0; i < length; i++) {
         char current = header[i];
         if (current == '_') {
-            current_header = NULL;  // CVE-2015-0219
+            client->request.current_header = NULL;  // CVE-2015-0219
             return 0;
         }
         if (current == '-') {
@@ -97,14 +125,14 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
         }
     }
     upperHeader[length] = 0;
-    char* old_header = current_header;
+    char* old_header = client->request.current_header;
 
     if ((strcmp(upperHeader, "CONTENT_LENGTH") == 0) || (strcmp(upperHeader, "CONTENT_TYPE") == 0)) {
-        current_header = upperHeader;
+        client->request.current_header = upperHeader;
     }
     else {
-        current_header = malloc(strlen(upperHeader) + 5);
-        sprintf(current_header, "HTTP_%s", upperHeader);
+        client->request.current_header = malloc(strlen(upperHeader) + 5);
+        sprintf(client->request.current_header, "HTTP_%s", upperHeader);
     }
 
     if (old_header)
@@ -115,9 +143,9 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
 
 int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     logger("on header value");
-    if (current_header != NULL) {
-        Request* request = (Request*)parser->data;
-        set_header(request->headers, current_header, value, length);
+    client_t * client = (client_t *)parser->data;
+    if (client->request.current_header != NULL) {
+        set_header(client->request.headers, client->request.current_header, value, length);
     }
     return 0;
 };
@@ -170,10 +198,11 @@ PyObject* extract_response(PyObject* wsgi_response) {
 
 int on_message_complete(llhttp_t* parser) {
     logger("on message complete");
-    Request* request = (Request*)parser->data;
+    client_t * client = (client_t *)parser->data;
+    PyObject * headers = client->request.headers;
 
     // Sets the input byte stream position back to 0
-    PyObject* body = PyDict_GetItem(request->headers, wsgi_input);
+    PyObject* body = PyDict_GetItem(headers, wsgi_input);
     PyObject* seek = PyUnicode_FromString("seek");
     PyObject* res = PyObject_CallMethodObjArgs(body, seek, PyLong_FromLong(0L), NULL);
     Py_DECREF(res);
@@ -187,16 +216,16 @@ int on_message_complete(llhttp_t* parser) {
     logger("calling wsgi application");
     PyObject* wsgi_response;
     wsgi_response = PyObject_CallFunctionObjArgs(
-        wsgi_app, request->headers, start_response, NULL
+        wsgi_app, headers, start_response, NULL
     );
     logger("called wsgi application");
 
     if (PyErr_Occurred()) {
-        request->state.error = 1;
+        client->request.state.error = 1;
         PyErr_Print();
     }
 
-    if (request->state.error == 0) {
+    if (client->request.state.error == 0) {
         PyObject* response_body = extract_response(wsgi_response);
         if (response_body != NULL) {
             build_response(response_body, start_response, parser);
@@ -206,7 +235,7 @@ int on_message_complete(llhttp_t* parser) {
 
     // FIXME: Try to not repeat this block in this method
     if (PyErr_Occurred()) {
-        request->state.error = 1;
+        client->request.state.error = 1;
         PyErr_Print();
     }
 
@@ -216,7 +245,7 @@ int on_message_complete(llhttp_t* parser) {
     Py_CLEAR(start_response);
 
     Py_CLEAR(wsgi_response);
-    Py_CLEAR(request->headers);
+    Py_CLEAR(client->request.headers);
     return 0;
 };
 
@@ -224,7 +253,7 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
     // This function needs a clean up
 
     logger("building response");
-    Request* request = (Request*)parser->data;
+    client_t * client = (client_t *)parser->data;
 
     int response_has_no_content = 0;
 
@@ -241,7 +270,7 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
     char* connection_header = "\r\nConnection: close";
     if (llhttp_should_keep_alive(parser)) {
         connection_header = "\r\nConnection: Keep-Alive";
-        request->state.keep_alive = 1;
+        client->request.state.keep_alive = 1;
     }
     char* old_buf = buf;
     buf = malloc(strlen(old_buf) + strlen(connection_header));
@@ -296,36 +325,30 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
     }
 
     logger(buf);
-    request->response_buffer.base = buf;
-    request->response_buffer.len = strlen(buf);
+    client->response.buffer.base = buf;
+    client->response.buffer.len = strlen(buf);
 }
 
 
 void build_wsgi_environ(llhttp_t* parser) {
     logger("building wsgi environ");
-    Request* request = (Request*)parser->data;
+    client_t * client = (client_t *)parser->data;
+    PyObject * headers = client->request.headers;
 
     const char* method = llhttp_method_name(parser->method);
+    set_header(headers, "REQUEST_METHOD", method, 0);
     const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
-    const char* remote_addr = request->remote_addr;
-
-    set_header(request->headers, "REQUEST_METHOD", method, strlen(method));
-    set_header(request->headers, "SERVER_PROTOCOL", protocol, strlen(protocol));
-    set_header(request->headers, "REMOTE_ADDR", remote_addr, strlen(remote_addr));
+    set_header(headers, "SERVER_PROTOCOL", protocol, 0);
+    set_header(headers, "REMOTE_ADDR", client->remote_addr, 0);
 }
 
 void init_request_dict() {
-    // Sets up base request dict for new incoming requests
-    // https://www.python.org/dev/peps/pep-3333/#specification-details
-    PyObject* io = PyImport_ImportModule("io");
-    PyObject* BytesIO = PyUnicode_FromString("BytesIO");
-    PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
-
+    // only constant values!!!
     base_dict = PyDict_New();
     PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
     PyDict_SetItem(base_dict, SERVER_NAME, server_host);
     PyDict_SetItem(base_dict, SERVER_PORT, server_port);
-    PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);
+    //PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);   // not const!!!
     PyDict_SetItem(base_dict, wsgi_version, version);
     PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);
     PyDict_SetItem(base_dict, wsgi_errors, PySys_GetObject("stderr"));

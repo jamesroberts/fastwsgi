@@ -1,3 +1,6 @@
+#ifndef FASTWSGI_CONSTANTS_H_
+#define FASTWSGI_CONSTANTS_H_
+
 #include <Python.h>
 
 PyObject* REQUEST_METHOD, * SCRIPT_NAME, * SERVER_NAME, * SERVER_PORT, * SERVER_PROTOCOL, * QUERY_STRING;
@@ -7,3 +10,5 @@ PyObject* server_host, * server_port, * empty_string;
 PyObject* HTTP_, * PATH_INFO, * wsgi_input;
 
 void init_constants();
+
+#endif
