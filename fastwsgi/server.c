@@ -38,14 +38,17 @@ void close_cb(uv_handle_t* handle) {
     free(client);
 }
 
+void close_connection(uv_stream_t* handle) {
+    if (!uv_is_closing((uv_handle_t*)handle))
+        uv_close((uv_handle_t*)handle, close_cb);
+}
+
 void shutdown_cb(uv_shutdown_t* req, int status) {
-    uv_handle_t* handle = (uv_handle_t*)req->handle;
-    if (!uv_is_closing(handle))
-        uv_close(handle, close_cb);
+    close_connection(req->handle);
     free(req);
 }
 
-void close_connection(uv_stream_t* handle) {
+void shutdown_connection(uv_stream_t* handle) {
     uv_shutdown_t* shutdown = malloc(sizeof(uv_shutdown_t));
     uv_shutdown(shutdown, handle, shutdown_cb);
 }
@@ -71,15 +74,14 @@ void stream_write(uv_stream_t* handle, const void* data, size_t size) {
 
 void send_error(uv_stream_t* handle, const char* error_string) {
     stream_write(handle, error_string, strlen(error_string));
-    close_connection(handle);   // fixme: maybe check keep_alive???
+    shutdown_connection(handle);   // fixme: maybe check keep_alive???
 }
-
 
 void send_response(uv_stream_t* handle, client_t* client) {
     uv_buf_t * resbuf = &client->response.buffer;
     stream_write(handle, resbuf->base, resbuf->len);
     if (!client->request.state.keep_alive)
-        close_connection(handle);
+        shutdown_connection(handle);
 }
 
 
@@ -112,7 +114,7 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         } else {
             if (nread != UV_ECONNRESET)
                 fprintf(stderr, "Read error %s\n", uv_err_name(nread));
-            close_connection(handle);
+            shutdown_connection(handle);
         }
     }
 
