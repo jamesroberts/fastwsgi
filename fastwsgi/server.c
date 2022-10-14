@@ -54,23 +54,30 @@ void write_cb(uv_write_t* req, int status) {
     if (status) {
         fprintf(stderr, "Write error %s\n", uv_strerror(status));
     }
-    write_req_t* write_req = (write_req_t*)req;
-    free(write_req->buf.base);
-    free(write_req);
+    //write_req_t* write_req = (write_req_t*)req;
+    free(req);
 }
 
-void send_error(write_req_t* req, uv_stream_t* handle, const char* error_string) {
-    char* error = malloc(strlen(error_string) + 1);
-    strcpy(error, error_string);
-    req->buf = uv_buf_init(error, strlen(error));
+void stream_write(uv_stream_t* handle, const void* data, size_t size) {
+    if (!data || size == 0)
+        return;
+    size_t req_size = _Py_SIZE_ROUND_UP(sizeof(write_req_t), 16);
+    write_req_t* req = (write_req_t*)malloc(req_size + size);
+    req->buf.base = (char *)req + req_size;
+    req->buf.len = size;
+    memcpy(req->buf.base, data, size);
     uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
-    close_connection(handle);
 }
 
-void send_response(write_req_t* req, uv_stream_t* handle, client_t* client) {
+void send_error(uv_stream_t* handle, const char* error_string) {
+    stream_write(handle, error_string, strlen(error_string));
+    close_connection(handle);   // fixme: maybe check keep_alive???
+}
+
+
+void send_response(uv_stream_t* handle, client_t* client) {
     uv_buf_t * resbuf = &client->response.buffer;
-    req->buf = uv_buf_init(resbuf->base, resbuf->len);
-    uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
+    stream_write(handle, resbuf->base, resbuf->len);
     if (!client->request.state.keep_alive)
         close_connection(handle);
 }
@@ -81,32 +88,30 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t* client = (client_t*)handle->data;
     llhttp_t * parser = &client->request.parser;
 
-    write_req_t* req = (write_req_t*)malloc(sizeof(write_req_t));
-
     if (nread > 0) {
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
             logger("Successfully parsed");
             if (client->response.buffer.len > 0)
-                send_response(req, handle, client);
+                send_response(handle, client);
             else if (client->request.state.error)
-                send_error(req, handle, INTERNAL_ERROR);
+                send_error(handle, INTERNAL_ERROR);
             else
                 continue_read = 1;
         }
         else {
             fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
-            send_error(req, handle, BAD_REQUEST);
+            send_error(handle, BAD_REQUEST);
         }
     }
     if (nread < 0) {
         uv_read_stop(handle);
 
-        if (nread == UV_ECONNRESET) {
+        if (nread == UV_EOF) {  // remote peer disconnected
             close_connection(handle);
-        }
-        else if (nread != UV_EOF) {
-            fprintf(stderr, "Read error %s\n", uv_err_name(nread));
+        } else {
+            if (nread != UV_ECONNRESET)
+                fprintf(stderr, "Read error %s\n", uv_err_name(nread));
             close_connection(handle);
         }
     }
