@@ -29,6 +29,15 @@ typedef struct {
     PyObject* server_host;
     PyObject* server_port;
     PyObject* empty_string;
+
+    PyObject* module_io;
+    PyObject* BytesIO;
+    PyObject* write;
+    PyObject* read;
+    PyObject* truncate;
+    PyObject* seek;
+    PyObject* getvalue;
+    PyObject* comma;
 } cvar_t;
 
 extern cvar_t g_cv;

@@ -28,4 +28,13 @@ void init_constants() {
     g_cv.server_host = PyUnicode_FromString("0.0.0.0");
     g_cv.server_port = PyUnicode_FromString("5000");
     g_cv.empty_string = PyUnicode_FromString("");
+
+    g_cv.module_io = PyImport_ImportModule("io");
+    g_cv.BytesIO = PyUnicode_FromString("BytesIO");
+    g_cv.write = PyUnicode_FromString("write");
+    g_cv.read = PyUnicode_FromString("read");
+    g_cv.truncate = PyUnicode_FromString("truncate");
+    g_cv.seek = PyUnicode_FromString("seek");
+    g_cv.getvalue = PyUnicode_FromString("getvalue");
+    g_cv.comma = PyUnicode_FromString(",");
 }

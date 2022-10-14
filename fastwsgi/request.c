@@ -20,14 +20,12 @@ static void set_header(PyObject* headers, const char* key, const char* value, si
 
     PyObject* existing_item = PyDict_GetItemString(headers, key);
     if (existing_item) {
-        PyObject* comma = PyUnicode_FromString(",");
         PyObject* value_list = Py_BuildValue("[SS]", existing_item, item);
-        PyObject* updated_item = PyUnicode_Join(comma, value_list);
+        PyObject* updated_item = PyUnicode_Join(g_cv.comma, value_list);
 
         PyDict_SetItemString(headers, key, updated_item);
         Py_DECREF(updated_item);
         Py_DECREF(value_list);
-        Py_DECREF(comma);
     }
     else {
         PyDict_SetItemString(headers, key, item);
@@ -48,22 +46,14 @@ int on_message_begin(llhttp_t* parser) {
         PyObject* headers = PyDict_Copy(base_dict);
         // Sets up base request dict for new incoming requests
         // https://www.python.org/dev/peps/pep-3333/#specification-details
-        PyObject* io = PyImport_ImportModule("io");
-        PyObject* BytesIO = PyUnicode_FromString("BytesIO");
-        PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
+        PyObject* io_BytesIO = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
         PyDict_SetItem(headers, g_cv.wsgi_input, io_BytesIO);
         client->request.headers = headers;
-        Py_DECREF(BytesIO);
-        Py_DECREF(io);
     } else {
         PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
-        PyObject* truncate = PyUnicode_FromString("truncate");
-        PyObject* result1 = PyObject_CallMethodObjArgs(input, truncate, PyLong_FromLong(0L), NULL);
-        Py_DECREF(truncate);
+        PyObject* result1 = PyObject_CallMethodObjArgs(input, g_cv.truncate, PyLong_FromLong(0L), NULL);
         Py_DECREF(result1);
-        PyObject* seek = PyUnicode_FromString("seek");
-        PyObject* result2 = PyObject_CallMethodObjArgs(input, seek, PyLong_FromLong(0L), NULL);
-        Py_DECREF(seek);
+        PyObject* result2 = PyObject_CallMethodObjArgs(input, g_cv.seek, PyLong_FromLong(0L), NULL);
         Py_DECREF(result2);
     }
     return 0;
@@ -94,11 +84,9 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
 
     PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
 
-    PyObject* write = PyUnicode_FromString("write");
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
     LOGREPR(LL_TRACE, body_content);
-    PyObject* result = PyObject_CallMethodObjArgs(input, write, body_content, NULL);
-    Py_DECREF(write);
+    PyObject* result = PyObject_CallMethodObjArgs(input, g_cv.write, body_content, NULL);
     Py_XDECREF(result);
     Py_XDECREF(body_content);
 
@@ -201,10 +189,8 @@ int on_message_complete(llhttp_t* parser) {
 
     // Sets the input byte stream position back to 0
     PyObject* body = PyDict_GetItem(headers, g_cv.wsgi_input);
-    PyObject* seek = PyUnicode_FromString("seek");
-    PyObject* res = PyObject_CallMethodObjArgs(body, seek, PyLong_FromLong(0L), NULL);
+    PyObject* res = PyObject_CallMethodObjArgs(body, g_cv.seek, PyLong_FromLong(0L), NULL);
     Py_DECREF(res);
-    Py_DECREF(seek);
 
     build_wsgi_environ(parser);
 
