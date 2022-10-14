@@ -1,12 +1,7 @@
 #ifndef FASTWSGI_LOGX_H_
 #define FASTWSGI_LOGX_H_
 
-#include <Python.h>
-#include "uv-common.h"
-
-#ifdef _WIN32
-#define vsnprintf _vsnprintf
-#endif
+#include "common.h"
 
 // log levels the same as syslog
 #define LL_FATAL_ERROR 1
@@ -17,11 +12,6 @@
 #define LL_INFO        6
 #define LL_DEBUG       7
 #define LL_TRACE       8 
-
-// forced use this only for alpha version!
-#ifndef FASTWSGI_DEBUG
-#define FASTWSGI_DEBUG
-#endif
 
 #ifndef MAX_LOG_LEVEL
 #ifdef FASTWSGI_DEBUG

@@ -1,12 +1,7 @@
 #ifndef FASTWSGI_REQUEST_H_
 #define FASTWSGI_REQUEST_H_
 
-#ifdef _MSC_VER
-// strncasecmp is not available on Windows
-#define strncasecmp _strnicmp
-#define strcasecmp _stricmp
-#endif
-
+#include "common.h"
 #include "start_response.h"
 
 

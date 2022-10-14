@@ -1,12 +1,9 @@
 #ifndef FASTWSGI_SERVER_H_
 #define FASTWSGI_SERVER_H_
 
-#include <Python.h>
-#include "uv.h"
-#include "uv-common.h"
+#include "common.h"
 #include "llhttp.h"
 #include "request.h"
-#include "logx.h"
 
 typedef struct {
     uv_write_t req;
