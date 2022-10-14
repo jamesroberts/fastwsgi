@@ -108,12 +108,16 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     LOGi("on header field");
     client_t * client = (client_t *)parser->data;
+    client->request.current_header[0] = 0;   // CVE-2015-0219
 
-    char* upperHeader = malloc(length + 1);
+    const size_t max_len = sizeof(client->request.current_header) - 1;
+    if (length >= max_len - 8)
+        return 0;
+
+    char upperHeader[sizeof(client->request.current_header)];
     for (size_t i = 0; i < length; i++) {
         char current = header[i];
         if (current == '_') {
-            client->request.current_header = NULL;  // CVE-2015-0219
             return 0;
         }
         if (current == '-') {
@@ -124,26 +128,21 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
         }
     }
     upperHeader[length] = 0;
-    char* old_header = client->request.current_header;
 
     if ((strcmp(upperHeader, "CONTENT_LENGTH") == 0) || (strcmp(upperHeader, "CONTENT_TYPE") == 0)) {
-        client->request.current_header = upperHeader;
+        strcpy(client->request.current_header, upperHeader);
     }
     else {
-        client->request.current_header = malloc(strlen(upperHeader) + 5);
-        sprintf(client->request.current_header, "HTTP_%s", upperHeader);
+        strcpy(client->request.current_header, "HTTP_");
+        strcat(client->request.current_header, upperHeader);
     }
-
-    if (old_header)
-        free(old_header);
-
     return 0;
 };
 
 int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     LOGi("on header value");
     client_t * client = (client_t *)parser->data;
-    if (client->request.current_header != NULL) {
+    if (client->request.current_header[0]) {
         set_header(client->request.headers, client->request.current_header, value, length);
     }
     return 0;
