@@ -8,13 +8,21 @@
 #include "request.h"
 #include "logx.h"
 
-extern PyObject* wsgi_app;
-
-
 typedef struct {
     uv_write_t req;
     uv_buf_t buf;
 } write_req_t;
+
+typedef struct {
+    PyObject* wsgi_app;
+    char* host;
+    int port;
+    int backlog;
+
+    uv_tcp_t server;
+    uv_loop_t* loop;
+    uv_os_fd_t file_descriptor;
+} server_t;
 
 typedef struct {
     int error;
@@ -22,6 +30,7 @@ typedef struct {
 } RequestState;
 
 typedef struct {
+    server_t * srv;
     uv_tcp_t handle;     // peer connection
     char remote_addr[24];
     struct {
@@ -34,6 +43,8 @@ typedef struct {
         uv_buf_t buffer;
     } response;
 } client_t;
+
+extern server_t g_srv;
 
 PyObject* run_server(PyObject* self, PyObject* args);
 

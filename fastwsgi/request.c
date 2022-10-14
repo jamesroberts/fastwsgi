@@ -215,7 +215,7 @@ int on_message_complete(llhttp_t* parser) {
     LOGi("calling wsgi application");
     PyObject* wsgi_response;
     wsgi_response = PyObject_CallFunctionObjArgs(
-        wsgi_app, headers, start_response, NULL
+        g_srv.wsgi_app, headers, start_response, NULL
     );
     LOGi("called wsgi application");
 

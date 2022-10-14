@@ -10,16 +10,7 @@
 #include "request.h"
 #include "constants.h"
 
-PyObject* wsgi_app;
-char* host;
-int port;
-int backlog;
-
-uv_tcp_t server;
-uv_loop_t* loop;
-uv_os_fd_t file_descriptor;
-
-struct sockaddr_in addr;
+server_t g_srv;
 
 static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
 static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
@@ -134,8 +125,9 @@ void connection_cb(uv_stream_t* server, int status) {
     }
 
     client_t* client = calloc(1, sizeof(client_t));
+    client->srv = &g_srv;
 
-    uv_tcp_init(loop, &client->handle);
+    uv_tcp_init(g_srv.loop, &client->handle);
     uv_tcp_nodelay(&client->handle, 0);
     uv_tcp_keepalive(&client->handle, 1, 60);
 
@@ -160,24 +152,25 @@ void connection_cb(uv_stream_t* server, int status) {
 
 void signal_handler(uv_signal_t* req, int signum) {
     if (signum == SIGINT) {
-        uv_stop(loop);
+        uv_stop(g_srv.loop);
         uv_signal_stop(req);
         exit(0);
     }
 }
 
 int main() {
-    loop = uv_default_loop();
+    g_srv.loop = uv_default_loop();
 
     configure_parser_settings();
     init_constants();
     init_request_dict();
 
-    uv_ip4_addr(host, port, &addr);
+    struct sockaddr_in addr;
+    uv_ip4_addr(g_srv.host, g_srv.port, &addr);
 
-    uv_tcp_init_ex(loop, &server, AF_INET);
+    uv_tcp_init_ex(g_srv.loop, &g_srv.server, AF_INET);
 
-    uv_fileno((const uv_handle_t*)&server, &file_descriptor);
+    uv_fileno((const uv_handle_t*)&g_srv.server, &g_srv.file_descriptor);
 
     int enabled = 1;
 #ifdef _WIN32
@@ -187,31 +180,32 @@ int main() {
     uv__socket_sockopt((uv_handle_t*)&server, so_reuseport, &enabled);
 #endif
 
-    int err = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
+    int err = uv_tcp_bind(&g_srv.server, (const struct sockaddr*)&addr, 0);
     if (err) {
         LOGe("Bind error %s\n", uv_strerror(err));
         return 1;
     }
 
-    err = uv_listen((uv_stream_t*)&server, backlog, connection_cb);
+    err = uv_listen((uv_stream_t*)&g_srv.server, g_srv.backlog, connection_cb);
     if (err) {
         LOGe("Listen error %s\n", uv_strerror(err));
         return 1;
     }
 
     uv_signal_t signal;
-    uv_signal_init(loop, &signal);
+    uv_signal_init(g_srv.loop, &signal);
     uv_signal_start(&signal, signal_handler, SIGINT);
 
-    uv_run(loop, UV_RUN_DEFAULT);
-    uv_loop_close(loop);
-    free(loop);
+    uv_run(g_srv.loop, UV_RUN_DEFAULT);
+    uv_loop_close(g_srv.loop);
+    free(g_srv.loop);
     return 0;
 }
 
 PyObject* run_server(PyObject* self, PyObject* args) {
+    memset(&g_srv, 0, sizeof(g_srv));
     int log_level = 0;
-    PyArg_ParseTuple(args, "Osiii", &wsgi_app, &host, &port, &backlog, &log_level);
+    PyArg_ParseTuple(args, "Osiii", &g_srv.wsgi_app, &g_srv.host, &g_srv.port, &g_srv.backlog, &log_level);
     set_log_level(log_level);
     main();
     Py_RETURN_NONE;
