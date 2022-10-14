@@ -286,11 +286,15 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
         LOGi("added header");
     }
 
-    if (response_has_no_content) {
+    size_t buf_len = strlen(buf);
+    size_t response_body_size = PyBytes_GET_SIZE(response_body);
+
+    if (response_has_no_content || response_body_size == 0) {
         char* old_buf = buf;
         buf = malloc(strlen(old_buf) + 26);
         sprintf(buf, "%s\r\nContent-Length: 0\r\n\r\n", old_buf);
         free(old_buf);
+        buf_len = strlen(buf);
     }
     else {
         char* response_body_str = PyBytes_AS_STRING(response_body);
@@ -298,19 +302,24 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
         if (content_length_header_present == 0) {
             char* old_buf = buf;
             buf = malloc(strlen(old_buf) + 32);
-            sprintf(buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body_str));
+            sprintf(buf, "%s\r\nContent-Length: %ld", old_buf, response_body_size);
             free(old_buf);
+            buf_len = strlen(buf);
         }
 
         char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + strlen(response_body_str) + 5);
-        sprintf(buf, "%s\r\n\r\n%s", old_buf, response_body_str);
+        buf = malloc(buf_len + 4 + response_body_size + 5);
+        memcpy(buf, old_buf, buf_len);
+        memcpy(buf + buf_len, "\r\n\r\n", 4);
+        buf_len += 4;
+        memcpy(buf + buf_len, response_body_str, response_body_size);
         free(old_buf);
+        buf_len += response_body_size;
     }
 
     LOGd(buf);
     client->response.buffer.base = buf;
-    client->response.buffer.len = strlen(buf);
+    client->response.buffer.len = buf_len;
 }
 
 
