@@ -5,7 +5,8 @@
 #include "start_response.h"
 
 
-PyObject* base_dict;
+extern PyObject* base_dict;
+
 void init_request_dict();
 void build_wsgi_environ(llhttp_t* parser);
 void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* parser);

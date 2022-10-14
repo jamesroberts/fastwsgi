@@ -4,6 +4,7 @@
 #include "common.h"
 #include "llhttp.h"
 #include "request.h"
+#include "xbuf.h"
 
 typedef struct {
     uv_write_t req;
@@ -37,7 +38,7 @@ typedef struct {
         RequestState state;
     } request;
     struct {
-        uv_buf_t buffer;
+        xbuf_t buf;
     } response;
 } client_t;
 

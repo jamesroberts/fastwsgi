@@ -20,8 +20,7 @@ void close_cb(uv_handle_t* handle) {
     LOGi("disconnected");
     client_t * client = (client_t *)handle->data;
     Py_XDECREF(client->request.headers);
-    if (client->response.buffer.base)
-        free(client->response.buffer.base);
+    xbuf_free(&client->response.buf);
     free(client);
 }
 
@@ -64,9 +63,8 @@ void send_error(uv_stream_t* handle, const char* error_string) {
 }
 
 void send_response(uv_stream_t* handle, client_t* client) {
-    uv_buf_t * resbuf = &client->response.buffer;
-    LOGi("send_response %d bytes", resbuf->len);
-    stream_write(handle, resbuf->base, resbuf->len);
+    LOGi("send_response %d bytes", client->response.buf.size);
+    stream_write(handle, client->response.buf.data, client->response.buf.size);
     if (!client->request.state.keep_alive)
         shutdown_connection(handle);
 }
@@ -77,11 +75,14 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t* client = (client_t*)handle->data;
     llhttp_t * parser = &client->request.parser;
 
+    if (client->response.buf.data == NULL)
+        xbuf_init(&client->response.buf, NULL, 64*1024);
+
     if (nread > 0) {
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
-            LOGi("Successfully parsed (response len = %d)", client->response.buffer.len);
-            if (client->response.buffer.len > 0)
+            LOGi("Successfully parsed (response len = %d)", client->response.buf.size);
+            if (client->response.buf.size > 0)
                 send_response(handle, client);
             else if (client->request.state.error)
                 send_error(handle, INTERNAL_ERROR);

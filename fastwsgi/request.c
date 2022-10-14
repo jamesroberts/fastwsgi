@@ -4,6 +4,8 @@
 #include "constants.h"
 #include "start_response.h"
 
+PyObject* base_dict = NULL;
+
 void logrepr(int level, PyObject* obj) {
     PyObject* repr = PyObject_Repr(obj);
     PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
@@ -38,10 +40,7 @@ int on_message_begin(llhttp_t* parser) {
     client_t * client = (client_t *)parser->data;
     client->request.state.keep_alive = 0;
     client->request.state.error = 0;
-    if (client->response.buffer.base)
-        free(client->response.buffer.base);
-    client->response.buffer.base = NULL;
-    client->response.buffer.len = 0;
+    client->response.buf.size = 0;
     if (client->request.headers == NULL) {
         PyObject* headers = PyDict_Copy(base_dict);
         // Sets up base request dict for new incoming requests
@@ -318,8 +317,8 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
     }
 
     LOGd(buf);
-    client->response.buffer.base = buf;
-    client->response.buffer.len = buf_len;
+    client->response.buf.size = 0;
+    xbuf_add(&client->response.buf, buf, buf_len);
 }
 
 
