@@ -4,13 +4,11 @@
 #include "constants.h"
 #include "start_response.h"
 
-static void reprint(PyObject* obj) {
+void logrepr(int level, PyObject* obj) {
     PyObject* repr = PyObject_Repr(obj);
     PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
     const char* bytes = PyBytes_AS_STRING(str);
-
-    printf("REPR: %s\n", bytes);
-
+    LOGX(level, "REPR: %s", bytes);
     Py_XDECREF(repr);
     Py_XDECREF(str);
 }

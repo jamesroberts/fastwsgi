@@ -24,10 +24,6 @@ struct sockaddr_in addr;
 static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
 static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
 
-void logger(char* message) {
-    if (LOGGING_ENABLED)
-        fprintf(stdout, ">>> %s\n", message);
-}
 
 void close_cb(uv_handle_t* handle) {
     logger("disconnected");
@@ -214,7 +210,9 @@ int main() {
 }
 
 PyObject* run_server(PyObject* self, PyObject* args) {
-    PyArg_ParseTuple(args, "Osiii", &wsgi_app, &host, &port, &backlog, &LOGGING_ENABLED);
+    int log_level = 0;
+    PyArg_ParseTuple(args, "Osiii", &wsgi_app, &host, &port, &backlog, &log_level);
+    set_log_level(log_level);
     main();
     Py_RETURN_NONE;
 }

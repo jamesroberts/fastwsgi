@@ -18,4 +18,7 @@ void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* 
 llhttp_settings_t parser_settings;
 void configure_parser_settings();
 
+void logrepr(int level, PyObject* obj);
+#define LOGREPR(_level_, _msg_) if (g_log_level >= _level_) logrepr(_level_, _msg_)
+
 #endif
