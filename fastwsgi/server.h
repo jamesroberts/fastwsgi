@@ -35,7 +35,7 @@ typedef struct {
     char remote_addr[24];
     struct {
         PyObject* headers;
-        char* current_header;
+        char current_header[128];
         llhttp_t parser;
         RequestState state;
     } request;

@@ -51,12 +51,12 @@ int on_message_begin(llhttp_t* parser) {
         PyObject* io = PyImport_ImportModule("io");
         PyObject* BytesIO = PyUnicode_FromString("BytesIO");
         PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
-        PyDict_SetItem(headers, wsgi_input, io_BytesIO);
+        PyDict_SetItem(headers, g_cv.wsgi_input, io_BytesIO);
         client->request.headers = headers;
         Py_DECREF(BytesIO);
         Py_DECREF(io);
     } else {
-        PyObject* input = PyDict_GetItem(client->request.headers, wsgi_input);
+        PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
         PyObject* truncate = PyUnicode_FromString("truncate");
         PyObject* result1 = PyObject_CallMethodObjArgs(input, truncate, PyLong_FromLong(0L), NULL);
         Py_DECREF(truncate);
@@ -92,7 +92,7 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
     LOGi("on body (len = %d)", (int)length);
     client_t * client = (client_t *)parser->data;
 
-    PyObject* input = PyDict_GetItem(client->request.headers, wsgi_input);
+    PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
 
     PyObject* write = PyUnicode_FromString("write");
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
@@ -200,7 +200,7 @@ int on_message_complete(llhttp_t* parser) {
     PyObject * headers = client->request.headers;
 
     // Sets the input byte stream position back to 0
-    PyObject* body = PyDict_GetItem(headers, wsgi_input);
+    PyObject* body = PyDict_GetItem(headers, g_cv.wsgi_input);
     PyObject* seek = PyUnicode_FromString("seek");
     PyObject* res = PyObject_CallMethodObjArgs(body, seek, PyLong_FromLong(0L), NULL);
     Py_DECREF(res);
@@ -343,16 +343,16 @@ void build_wsgi_environ(llhttp_t* parser) {
 void init_request_dict() {
     // only constant values!!!
     base_dict = PyDict_New();
-    PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
-    PyDict_SetItem(base_dict, SERVER_NAME, server_host);
-    PyDict_SetItem(base_dict, SERVER_PORT, server_port);
-    //PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);   // not const!!!
-    PyDict_SetItem(base_dict, wsgi_version, version);
-    PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);
-    PyDict_SetItem(base_dict, wsgi_errors, PySys_GetObject("stderr"));
-    PyDict_SetItem(base_dict, wsgi_run_once, Py_False);
-    PyDict_SetItem(base_dict, wsgi_multithread, Py_False);
-    PyDict_SetItem(base_dict, wsgi_multiprocess, Py_True);
+    PyDict_SetItem(base_dict, g_cv.SCRIPT_NAME, g_cv.empty_string);
+    PyDict_SetItem(base_dict, g_cv.SERVER_NAME, g_cv.server_host);
+    PyDict_SetItem(base_dict, g_cv.SERVER_PORT, g_cv.server_port);
+    //PyDict_SetItem(base_dict, g_cv.wsgi_input, io_BytesIO);   // not const!!!
+    PyDict_SetItem(base_dict, g_cv.wsgi_version, g_cv.version);
+    PyDict_SetItem(base_dict, g_cv.wsgi_url_scheme, g_cv.http_scheme);
+    PyDict_SetItem(base_dict, g_cv.wsgi_errors, PySys_GetObject("stderr"));
+    PyDict_SetItem(base_dict, g_cv.wsgi_run_once, Py_False);
+    PyDict_SetItem(base_dict, g_cv.wsgi_multithread, Py_False);
+    PyDict_SetItem(base_dict, g_cv.wsgi_multiprocess, Py_True);
 }
 
 void configure_parser_settings() {
