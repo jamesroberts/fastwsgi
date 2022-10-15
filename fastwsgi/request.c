@@ -232,72 +232,91 @@ int on_message_complete(llhttp_t* parser) {
     return 0;
 };
 
-void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
-    LOGi("building response");
-    client_t * client = (client_t *)parser->data;
+int build_response_ex(void * _client, int flags, int status, const void * headers, const char * body, int body_size) {
+    client_t * client = (client_t *)_client;
     xbuf_t * xbuf = &client->response.buf;
     xbuf->size = 0;   // reset buffer
-
-    int response_has_no_content = 0;
-
-    size_t status_len = 0;
-    const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
-    if (status_len == 3) {
-        if (strncmp(status_code, "204", 3) == 0 || strncmp(status_code, "304", 3) == 0)
-            response_has_no_content = 1;
+    StartResponse * response = NULL;
+    if (flags & RF_HEADERS_PYLIST) {
+        response = (StartResponse *)headers;
+        headers = NULL;
     }
+    if (response) {
+        size_t status_len = 0;
+        const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
+        status = atoi(status_code);
+    }
+    if (status == 204 || status == 304)
+        body_size = 0;  // response has no content
 
-    char * buf = xbuf_expand(xbuf, 32);
-    xbuf->size += sprintf(buf, "HTTP/1.1 %s\r\n", status_code);
+    const char * status_name = llhttp_status_name(status);
+    if (!status_name)
+        return -1;
 
-    char* connection_header = "\r\nConnection: close";
-    if (llhttp_should_keep_alive(parser)) {
-        client->request.state.keep_alive = 1;
+    char * buf = xbuf_expand(xbuf, 128);
+    xbuf->size += sprintf(buf, "HTTP/1.1 %d %s\r\n", status, status_name);
+
+    if (flags & RF_SET_KEEP_ALIVE) {
         xbuf_add_str(xbuf, "Connection: Keep-Alive\r\n");
-    }
-    else {
+    } else {
         xbuf_add_str(xbuf, "Connection: close\r\n");
     }
 
-    int content_length_header_present = 0;
-    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); i++) {
-        PyObject* tuple = PyList_GET_ITEM(response->headers, i);
+    if (response) {
+        Py_ssize_t hsize = PyList_GET_SIZE(response->headers);
+        for (Py_ssize_t i = 0; i < hsize; i++) {
+            PyObject* tuple = PyList_GET_ITEM(response->headers, i);
 
-        size_t key_len = 0;
-        const char * key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
-        size_t value_len = 0;
-        const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
+            size_t key_len = 0;
+            const char * key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
 
-        if (!content_length_header_present)
-            if (strcasecmp(key, "Content-Length") == 0)
-                content_length_header_present = 1;
+            if (key_len == 14 && key[7] == '-')
+                if (strcasecmp(key, "Content-Length") == 0)
+                    continue;  // skip "Content-Length" header
 
-        xbuf_add(xbuf, key, key_len);
-        xbuf_add(xbuf, ": ", 2);
-        xbuf_add(xbuf, value, value_len);
-        xbuf_add(xbuf, "\r\n", 2);
+            size_t value_len = 0;
+            const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
-        LOGi("added header \"%s: %s\"", key, value);
-    }
+            xbuf_add(xbuf, key, key_len);
+            xbuf_add(xbuf, ": ", 2);
+            xbuf_add(xbuf, value, value_len);
+            xbuf_add(xbuf, "\r\n", 2);
 
-    size_t response_body_size = PyBytes_GET_SIZE(response_body);
-    char * response_body_data = PyBytes_AS_STRING(response_body);
-
-    if (response_has_no_content) {
-        xbuf_add_str(xbuf, "Content-Length: 0\r\n");
-        response_body_size = 0;
-    }
-    else {
-        if (content_length_header_present == 0) {
-            char * buf = xbuf_expand(xbuf, 48);
-            xbuf->size += sprintf(buf, "Content-Length: %d\r\n", (int)response_body_size);
+            LOGi("added header \"%s: %s\"", key, value);
         }
     }
+    else if (headers) {
+        xbuf_add_str(xbuf, (const char *)headers);
+    }
+
+    if (!body || body_size == 0) {
+        xbuf_add_str(xbuf, "Content-Length: 0\r\n");
+        body_size = 0;
+        //LOGi("added header \"Content-Length: 0\"");
+    } else {
+        char * buf = xbuf_expand(xbuf, 48);
+        xbuf->size += sprintf(buf, "Content-Length: %d\r\n", (int)body_size);
+        //LOGi("added header \"Content-Length: %d\"", (int)body_size);
+    }
     xbuf_add(xbuf, "\r\n", 2);  // end of headers
-    if (response_body_size)
-        xbuf_add(xbuf, response_body_data, response_body_size);
+    if (body && body_size)
+        xbuf_add(xbuf, body, body_size);
 
     LOGt(xbuf->data);
+    return xbuf->size;
+}
+
+void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
+    LOGi("building response");
+    client_t * client = (client_t *)parser->data;
+    int flags = RF_HEADERS_PYLIST;
+    if (llhttp_should_keep_alive(&client->request.parser)) {
+        flags |= RF_SET_KEEP_ALIVE;
+        client->request.state.keep_alive = 1;
+    }
+    size_t body_size = PyBytes_GET_SIZE(response_body);
+    char * body_data = PyBytes_AS_STRING(response_body);
+    build_response_ex(client, flags, 0, response, body_data, body_size);
 }
 
 

@@ -28,8 +28,8 @@ typedef struct {
 } RequestState;
 
 typedef struct {
+    uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * srv;
-    uv_tcp_t handle;     // peer connection
     char remote_addr[24];
     struct {
         PyObject* headers;

@@ -12,13 +12,10 @@
 
 server_t g_srv;
 
-static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
-static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-
 
 void close_cb(uv_handle_t* handle) {
     LOGi("disconnected");
-    client_t * client = (client_t *)handle->data;
+    client_t * client = (client_t *)handle;
     Py_XDECREF(client->request.headers);
     xbuf_free(&client->response.buf);
     free(client);
@@ -45,34 +42,52 @@ void write_cb(uv_write_t* req, int status) {
     free(req);
 }
 
-void stream_write(uv_stream_t* handle, const void* data, size_t size) {
-    if (!data || size == 0)
-        return;
+void stream_write(client_t * client, const void* data, size_t size) {
+    if (!data || !size) {
+        data = (const void*)client->response.buf.data;
+        size = (size_t)client->response.buf.size;
+        if (!data || size == 0)
+            return;
+    }
     size_t req_size = _Py_SIZE_ROUND_UP(sizeof(write_req_t), 16);
     write_req_t* req = (write_req_t*)malloc(req_size + size);
     req->buf.base = (char *)req + req_size;
     req->buf.len = size;
     memcpy(req->buf.base, data, size);
-    uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
+    uv_write((uv_write_t*)req, (uv_stream_t*)client, &req->buf, 1, write_cb);
 }
 
-void send_error(uv_stream_t* handle, const char* error_string) {
-    LOGe("%.25s", error_string);
-    stream_write(handle, error_string, strlen(error_string));
-    shutdown_connection(handle);   // fixme: maybe check keep_alive???
+void send_fatal(client_t * client, int status, const char* error_string) {
+    if (!status)
+        status = HTTP_STATUS_BAD_REQUEST;
+    LOGe("send_fatal: %d", status);
+    int body_size = error_string ? strlen(error_string) : 0;
+    build_response_ex(client, 0, status, NULL, error_string, body_size);
+    stream_write(client, NULL, 0);
+    shutdown_connection((uv_stream_t*)client);
 }
 
-void send_response(uv_stream_t* handle, client_t* client) {
+void send_error(client_t * client, int status, const char* error_string) {
+    if (!status)
+        status = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    LOGe("send_error: %d", status);
+    int body_size = error_string ? strlen(error_string) : 0;
+    build_response_ex(client, 0, status, NULL, error_string, body_size);
+    stream_write(client, NULL, 0);
+    shutdown_connection((uv_stream_t*)client);   // fixme: maybe check keep_alive???
+}
+
+void send_response(client_t * client) {
     LOGi("send_response %d bytes", client->response.buf.size);
-    stream_write(handle, client->response.buf.data, client->response.buf.size);
+    stream_write(client, NULL, 0);
     if (!client->request.state.keep_alive)
-        shutdown_connection(handle);
+        shutdown_connection((uv_stream_t*)client);
 }
 
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     int continue_read = 0;
-    client_t* client = (client_t*)handle->data;
+    client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
 
     if (client->response.buf.data == NULL)
@@ -87,15 +102,15 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         if (err == HPE_OK) {
             LOGi("Successfully parsed (response len = %d)", client->response.buf.size);
             if (client->response.buf.size > 0)
-                send_response(handle, client);
+                send_response(client);
             else if (client->request.state.error)
-                send_error(handle, INTERNAL_ERROR);
+                send_error(client, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL);
             else
                 continue_read = 1;
         }
         else {
             LOGe("Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
-            send_error(handle, BAD_REQUEST);
+            send_fatal(client, HTTP_STATUS_BAD_REQUEST, NULL);
         }
     }
     LOGd_IF(!nread, "read_cb: nread = 0");
