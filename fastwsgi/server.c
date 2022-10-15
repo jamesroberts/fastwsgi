@@ -79,6 +79,10 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         xbuf_init(&client->response.buf, NULL, 64*1024);
 
     if (nread > 0) {
+        if ((ssize_t)buf->len > nread)
+            buf->base[nread] = 0;
+        LOGd("read_cb: [nread = %d]", (int)nread);
+        LOGt(buf->base);
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
             LOGi("Successfully parsed (response len = %d)", client->response.buf.size);
@@ -94,14 +98,19 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
             send_error(handle, BAD_REQUEST);
         }
     }
+    LOGd_IF(!nread, "read_cb: nread = 0");
     if (nread < 0) {
+        char err_name[128];
+        uv_err_name_r((int)nread, err_name, sizeof(err_name) - 1);
+        LOGd("read_cb: nread = %d  error: %s", (int)nread, err_name);
+
         uv_read_stop(handle);
 
         if (nread == UV_EOF) {  // remote peer disconnected
             close_connection(handle);
         } else {
             if (nread != UV_ECONNRESET)
-                LOGe("Read error %s\n", uv_err_name(nread));
+                LOGe("Read error: %s", err_name);
             shutdown_connection(handle);
         }
     }
@@ -115,8 +124,9 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
     LOGi("Allocating buffer (size = %d)", (int)suggested_size);
-    buf->base = (char*)malloc(suggested_size);
+    buf->base = (char*)malloc(suggested_size + 1);
     buf->len = suggested_size;
+    buf->base[suggested_size] = 0;
 }
 
 void connection_cb(uv_stream_t* server, int status) {
@@ -124,7 +134,7 @@ void connection_cb(uv_stream_t* server, int status) {
         LOGe("Connection error %s\n", uv_strerror(status));
         return;
     }
-
+    LOGi("new connection...");
     client_t* client = calloc(1, sizeof(client_t));
     client->srv = &g_srv;
 
