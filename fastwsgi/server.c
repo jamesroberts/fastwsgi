@@ -71,10 +71,12 @@ void send_error(client_t * client, int status, const char* error_string) {
     if (!status)
         status = HTTP_STATUS_INTERNAL_SERVER_ERROR;
     LOGe("send_error: %d", status);
+    int flags = (client->request.state.keep_alive) ? RF_SET_KEEP_ALIVE : 0;
     int body_size = error_string ? strlen(error_string) : 0;
-    build_response_ex(client, 0, status, NULL, error_string, body_size);
+    build_response_ex(client, flags, status, NULL, error_string, body_size);
     stream_write(client, NULL, 0);
-    shutdown_connection((uv_stream_t*)client);   // fixme: maybe check keep_alive???
+    if (!client->request.state.keep_alive)
+        shutdown_connection((uv_stream_t*)client);
 }
 
 void send_response(client_t * client) {

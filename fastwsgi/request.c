@@ -310,10 +310,9 @@ void build_response(PyObject* response_body, StartResponse* response, llhttp_t* 
     LOGi("building response");
     client_t * client = (client_t *)parser->data;
     int flags = RF_HEADERS_PYLIST;
-    if (llhttp_should_keep_alive(&client->request.parser)) {
+    if (client->request.state.keep_alive)
         flags |= RF_SET_KEEP_ALIVE;
-        client->request.state.keep_alive = 1;
-    }
+
     size_t body_size = PyBytes_GET_SIZE(response_body);
     char * body_data = PyBytes_AS_STRING(response_body);
     build_response_ex(client, flags, 0, response, body_data, body_size);
