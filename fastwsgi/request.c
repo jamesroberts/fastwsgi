@@ -233,92 +233,71 @@ int on_message_complete(llhttp_t* parser) {
 };
 
 void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
-    // This function needs a clean up
-
     LOGi("building response");
     client_t * client = (client_t *)parser->data;
+    xbuf_t * xbuf = &client->response.buf;
+    xbuf->size = 0;   // reset buffer
 
     int response_has_no_content = 0;
 
-    PyObject* status = PyUnicode_AsUTF8String(response->status);
-    char* status_code = PyBytes_AS_STRING(status);
-    if (strncmp(status_code, "204", 3) == 0 || strncmp(status_code, "304", 3) == 0) {
-        response_has_no_content = 1;
+    size_t status_len = 0;
+    const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
+    if (status_len == 3) {
+        if (strncmp(status_code, "204", 3) == 0 || strncmp(status_code, "304", 3) == 0)
+            response_has_no_content = 1;
     }
 
-    char* buf = malloc(strlen(status_code) + 10);
-    sprintf(buf, "HTTP/1.1 %s", status_code);
-    Py_DECREF(status);
+    char * buf = xbuf_expand(xbuf, 32);
+    xbuf->size += sprintf(buf, "HTTP/1.1 %s\r\n", status_code);
 
     char* connection_header = "\r\nConnection: close";
     if (llhttp_should_keep_alive(parser)) {
-        connection_header = "\r\nConnection: Keep-Alive";
         client->request.state.keep_alive = 1;
+        xbuf_add_str(xbuf, "Connection: Keep-Alive\r\n");
     }
-    char* old_buf = buf;
-    buf = malloc(strlen(old_buf) + strlen(connection_header));
-    sprintf(buf, "%s%s", old_buf, connection_header);
-    free(old_buf);
+    else {
+        xbuf_add_str(xbuf, "Connection: close\r\n");
+    }
 
     int content_length_header_present = 0;
     for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); i++) {
         PyObject* tuple = PyList_GET_ITEM(response->headers, i);
 
-        PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
-        PyObject* value = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 1));
-
-        char* header_field = PyBytes_AS_STRING(field);
-        char* header_value = PyBytes_AS_STRING(value);
+        size_t key_len = 0;
+        const char * key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
+        size_t value_len = 0;
+        const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
         if (!content_length_header_present)
-            if (strcasecmp("Content-Length", header_field) == 0)
+            if (strcasecmp(key, "Content-Length") == 0)
                 content_length_header_present = 1;
 
-        char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + strlen(header_field) + strlen(header_value) + 5);
-        sprintf(buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
-        free(old_buf);
+        xbuf_add(xbuf, key, key_len);
+        xbuf_add(xbuf, ": ", 2);
+        xbuf_add(xbuf, value, value_len);
+        xbuf_add(xbuf, "\r\n", 2);
 
-        Py_DECREF(field);
-        Py_DECREF(value);
-
-        LOGi("added header");
+        LOGi("added header \"%s: %s\"", key, value);
     }
 
-    size_t buf_len = strlen(buf);
     size_t response_body_size = PyBytes_GET_SIZE(response_body);
+    char * response_body_data = PyBytes_AS_STRING(response_body);
 
-    if (response_has_no_content || response_body_size == 0) {
-        char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + 26);
-        sprintf(buf, "%s\r\nContent-Length: 0\r\n\r\n", old_buf);
-        free(old_buf);
-        buf_len = strlen(buf);
+    if (response_has_no_content) {
+        xbuf_add_str(xbuf, "Content-Length: 0\r\n");
+        response_body_size = 0;
     }
     else {
-        char* response_body_str = PyBytes_AS_STRING(response_body);
-
         if (content_length_header_present == 0) {
-            char* old_buf = buf;
-            buf = malloc(strlen(old_buf) + 32);
-            sprintf(buf, "%s\r\nContent-Length: %ld", old_buf, response_body_size);
-            free(old_buf);
-            buf_len = strlen(buf);
+            char * buf = xbuf_expand(xbuf, 48);
+            xbuf->size += sprintf(buf, "Content-Length: %d\r\n", (int)response_body_size);
         }
-
-        char* old_buf = buf;
-        buf = malloc(buf_len + 4 + response_body_size + 5);
-        memcpy(buf, old_buf, buf_len);
-        memcpy(buf + buf_len, "\r\n\r\n", 4);
-        buf_len += 4;
-        memcpy(buf + buf_len, response_body_str, response_body_size);
-        free(old_buf);
-        buf_len += response_body_size;
     }
+    xbuf_add(xbuf, "\r\n", 2);  // end of headers
+    if (response_body_size)
+        xbuf_add(xbuf, response_body_data, response_body_size);
 
-    LOGd(buf);
-    client->response.buf.size = 0;
-    xbuf_add(&client->response.buf, buf, buf_len);
+    LOGt(xbuf->data);
 }
 
 

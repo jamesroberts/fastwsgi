@@ -21,7 +21,7 @@ char * xbuf_expand(xbuf_t * buf, size_t expand_size)
         } else {
             new_cap += 512*1024;
         }
-        char * new_ptr = (char *)malloc(new_cap);
+        char * new_ptr = (char *)malloc(new_cap + 2);
         if (!new_ptr)
             return NULL; // error
         new_ptr[0] = 0;
