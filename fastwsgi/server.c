@@ -202,10 +202,10 @@ int main() {
 
     int enabled = 1;
 #ifdef _WIN32
-    //uv__socket_sockopt((uv_handle_t*)&server, SO_REUSEADDR, &enabled);
+    //uv__socket_sockopt((uv_handle_t*)&g_srv.server, SO_REUSEADDR, &enabled);
 #else
     int so_reuseport = 15;  // SO_REUSEPORT
-    uv__socket_sockopt((uv_handle_t*)&server, so_reuseport, &enabled);
+    uv__socket_sockopt((uv_handle_t*)&g_srv.server, so_reuseport, &enabled);
 #endif
 
     int err = uv_tcp_bind(&g_srv.server, (const struct sockaddr*)&addr, 0);

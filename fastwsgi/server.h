@@ -12,14 +12,13 @@ typedef struct {
 } write_req_t;
 
 typedef struct {
+    uv_tcp_t server;
+    uv_loop_t* loop;
+    uv_os_fd_t file_descriptor;
     PyObject* wsgi_app;
     char* host;
     int port;
     int backlog;
-
-    uv_tcp_t server;
-    uv_loop_t* loop;
-    uv_os_fd_t file_descriptor;
 } server_t;
 
 typedef struct {
