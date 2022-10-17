@@ -10,31 +10,14 @@
 #include "request.h"
 #include "constants.h"
 
-PyObject* wsgi_app;
-char* host;
-int port;
-int backlog;
+server_t g_srv;
 
-uv_tcp_t server;
-uv_loop_t* loop;
-uv_os_fd_t file_descriptor;
-
-struct sockaddr_in addr;
-
-static const char* BAD_REQUEST = "HTTP/1.1 400 Bad Request\r\n\r\n";
-static const char* INTERNAL_ERROR = "HTTP/1.1 500 Internal Server Error\r\n\r\n";
-
-void logger(char* message) {
-    if (LOGGING_ENABLED)
-        fprintf(stdout, ">>> %s\n", message);
-}
 
 void close_cb(uv_handle_t* handle) {
-    logger("disconnected");
-    client_t * client = (client_t *)handle->data;
+    LOGi("disconnected");
+    client_t * client = (client_t *)handle;
     Py_XDECREF(client->request.headers);
-    if (client->response.buffer.base)
-        free(client->response.buffer.base);
+    xbuf_free(&client->response.buf);
     free(client);
 }
 
@@ -54,66 +37,97 @@ void shutdown_connection(uv_stream_t* handle) {
 }
 
 void write_cb(uv_write_t* req, int status) {
-    if (status) {
-        fprintf(stderr, "Write error %s\n", uv_strerror(status));
-    }
+    LOGe_IF(status, "Write error %s\n", uv_strerror(status));
     //write_req_t* write_req = (write_req_t*)req;
     free(req);
 }
 
-void stream_write(uv_stream_t* handle, const void* data, size_t size) {
-    if (!data || size == 0)
-        return;
+void stream_write(client_t * client, const void* data, size_t size) {
+    if (!data || !size) {
+        data = (const void*)client->response.buf.data;
+        size = (size_t)client->response.buf.size;
+        if (!data || size == 0)
+            return;
+    }
     size_t req_size = _Py_SIZE_ROUND_UP(sizeof(write_req_t), 16);
     write_req_t* req = (write_req_t*)malloc(req_size + size);
     req->buf.base = (char *)req + req_size;
     req->buf.len = size;
     memcpy(req->buf.base, data, size);
-    uv_write((uv_write_t*)req, handle, &req->buf, 1, write_cb);
+    uv_write((uv_write_t*)req, (uv_stream_t*)client, &req->buf, 1, write_cb);
 }
 
-void send_error(uv_stream_t* handle, const char* error_string) {
-    stream_write(handle, error_string, strlen(error_string));
-    shutdown_connection(handle);   // fixme: maybe check keep_alive???
+void send_fatal(client_t * client, int status, const char* error_string) {
+    if (!status)
+        status = HTTP_STATUS_BAD_REQUEST;
+    LOGe("send_fatal: %d", status);
+    int body_size = error_string ? strlen(error_string) : 0;
+    build_response_ex(client, 0, status, NULL, error_string, body_size);
+    stream_write(client, NULL, 0);
+    shutdown_connection((uv_stream_t*)client);
 }
 
-void send_response(uv_stream_t* handle, client_t* client) {
-    uv_buf_t * resbuf = &client->response.buffer;
-    stream_write(handle, resbuf->base, resbuf->len);
+void send_error(client_t * client, int status, const char* error_string) {
+    if (!status)
+        status = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    LOGe("send_error: %d", status);
+    int flags = (client->request.state.keep_alive) ? RF_SET_KEEP_ALIVE : 0;
+    int body_size = error_string ? strlen(error_string) : 0;
+    build_response_ex(client, flags, status, NULL, error_string, body_size);
+    stream_write(client, NULL, 0);
     if (!client->request.state.keep_alive)
-        shutdown_connection(handle);
+        shutdown_connection((uv_stream_t*)client);
+}
+
+void send_response(client_t * client) {
+    LOGi("send_response %d bytes", client->response.buf.size);
+    stream_write(client, NULL, 0);
+    if (!client->request.state.keep_alive)
+        shutdown_connection((uv_stream_t*)client);
 }
 
 
 void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     int continue_read = 0;
-    client_t* client = (client_t*)handle->data;
+    client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
 
+    if (client->response.buf.data == NULL)
+        xbuf_init(&client->response.buf, NULL, 64*1024);
+
     if (nread > 0) {
+        if ((ssize_t)buf->len > nread)
+            buf->base[nread] = 0;
+        LOGd("read_cb: [nread = %d]", (int)nread);
+        LOGt(buf->base);
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
-            logger("Successfully parsed");
-            if (client->response.buffer.len > 0)
-                send_response(handle, client);
+            LOGi("Successfully parsed (response len = %d)", client->response.buf.size);
+            if (client->response.buf.size > 0)
+                send_response(client);
             else if (client->request.state.error)
-                send_error(handle, INTERNAL_ERROR);
+                send_error(client, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL);
             else
                 continue_read = 1;
         }
         else {
-            fprintf(stderr, "Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
-            send_error(handle, BAD_REQUEST);
+            LOGe("Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
+            send_fatal(client, HTTP_STATUS_BAD_REQUEST, NULL);
         }
     }
+    LOGd_IF(!nread, "read_cb: nread = 0");
     if (nread < 0) {
+        char err_name[128];
+        uv_err_name_r((int)nread, err_name, sizeof(err_name) - 1);
+        LOGd("read_cb: nread = %d  error: %s", (int)nread, err_name);
+
         uv_read_stop(handle);
 
         if (nread == UV_EOF) {  // remote peer disconnected
             close_connection(handle);
         } else {
             if (nread != UV_ECONNRESET)
-                fprintf(stderr, "Read error %s\n", uv_err_name(nread));
+                LOGe("Read error: %s", err_name);
             shutdown_connection(handle);
         }
     }
@@ -126,20 +140,22 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
 }
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-    logger("Allocating buffer");
-    buf->base = (char*)malloc(suggested_size);
+    LOGi("Allocating buffer (size = %d)", (int)suggested_size);
+    buf->base = (char*)malloc(suggested_size + 1);
     buf->len = suggested_size;
+    buf->base[suggested_size] = 0;
 }
 
 void connection_cb(uv_stream_t* server, int status) {
     if (status < 0) {
-        fprintf(stderr, "Connection error %s\n", uv_strerror(status));
+        LOGe("Connection error %s\n", uv_strerror(status));
         return;
     }
-
+    LOGi("new connection...");
     client_t* client = calloc(1, sizeof(client_t));
+    client->srv = &g_srv;
 
-    uv_tcp_init(loop, &client->handle);
+    uv_tcp_init(g_srv.loop, &client->handle);
     uv_tcp_nodelay(&client->handle, 0);
     uv_tcp_keepalive(&client->handle, 1, 60);
 
@@ -164,57 +180,61 @@ void connection_cb(uv_stream_t* server, int status) {
 
 void signal_handler(uv_signal_t* req, int signum) {
     if (signum == SIGINT) {
-        uv_stop(loop);
+        uv_stop(g_srv.loop);
         uv_signal_stop(req);
         exit(0);
     }
 }
 
 int main() {
-    loop = uv_default_loop();
+    g_srv.loop = uv_default_loop();
 
     configure_parser_settings();
     init_constants();
     init_request_dict();
 
-    uv_ip4_addr(host, port, &addr);
+    struct sockaddr_in addr;
+    uv_ip4_addr(g_srv.host, g_srv.port, &addr);
 
-    uv_tcp_init_ex(loop, &server, AF_INET);
+    uv_tcp_init_ex(g_srv.loop, &g_srv.server, AF_INET);
 
-    uv_fileno((const uv_handle_t*)&server, &file_descriptor);
+    uv_fileno((const uv_handle_t*)&g_srv.server, &g_srv.file_descriptor);
 
     int enabled = 1;
 #ifdef _WIN32
-    //uv__socket_sockopt((uv_handle_t*)&server, SO_REUSEADDR, &enabled);
+    //uv__socket_sockopt((uv_handle_t*)&g_srv.server, SO_REUSEADDR, &enabled);
 #else
     int so_reuseport = 15;  // SO_REUSEPORT
-    uv__socket_sockopt((uv_handle_t*)&server, so_reuseport, &enabled);
+    uv__socket_sockopt((uv_handle_t*)&g_srv.server, so_reuseport, &enabled);
 #endif
 
-    int err = uv_tcp_bind(&server, (const struct sockaddr*)&addr, 0);
+    int err = uv_tcp_bind(&g_srv.server, (const struct sockaddr*)&addr, 0);
     if (err) {
-        fprintf(stderr, "Bind error %s\n", uv_strerror(err));
+        LOGe("Bind error %s\n", uv_strerror(err));
         return 1;
     }
 
-    err = uv_listen((uv_stream_t*)&server, backlog, connection_cb);
+    err = uv_listen((uv_stream_t*)&g_srv.server, g_srv.backlog, connection_cb);
     if (err) {
-        fprintf(stderr, "Listen error %s\n", uv_strerror(err));
+        LOGe("Listen error %s\n", uv_strerror(err));
         return 1;
     }
 
     uv_signal_t signal;
-    uv_signal_init(loop, &signal);
+    uv_signal_init(g_srv.loop, &signal);
     uv_signal_start(&signal, signal_handler, SIGINT);
 
-    uv_run(loop, UV_RUN_DEFAULT);
-    uv_loop_close(loop);
-    free(loop);
+    uv_run(g_srv.loop, UV_RUN_DEFAULT);
+    uv_loop_close(g_srv.loop);
+    free(g_srv.loop);
     return 0;
 }
 
 PyObject* run_server(PyObject* self, PyObject* args) {
-    PyArg_ParseTuple(args, "Osiii", &wsgi_app, &host, &port, &backlog, &LOGGING_ENABLED);
+    memset(&g_srv, 0, sizeof(g_srv));
+    int log_level = 0;
+    PyArg_ParseTuple(args, "Osiii", &g_srv.wsgi_app, &g_srv.host, &g_srv.port, &g_srv.backlog, &log_level);
+    set_log_level(log_level);
     main();
     Py_RETURN_NONE;
 }

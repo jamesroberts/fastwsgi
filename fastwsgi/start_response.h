@@ -1,6 +1,7 @@
 #ifndef START_RESPONSE_H_
 #define START_RESPONSE_H_
-#include <Python.h>
+
+#include "common.h"
 
 typedef struct {
     PyObject ob_base;

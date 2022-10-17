@@ -10,7 +10,7 @@ NUM_WORKERS = 4
 HOST = "0.0.0.0"
 PORT = 5000
 BACKLOG = 1024
-LOGGING = 0
+LOGLEVEL = 0
 
 
 def run_multi_process_server(app):
@@ -60,7 +60,7 @@ def print_server_details(host, port):
 @click.version_option(version=get_distribution("fastwsgi").version, message="%(version)s")
 @click.option("--host", help="Host the socket is bound to.", type=str, default=HOST, show_default=True)
 @click.option("-p", "--port", help="Port the socket is bound to.", type=int, default=PORT, show_default=True)
-@click.option("-l", "--logging", help="Enable logging.", default=bool(LOGGING), is_flag=True, type=bool, show_default=True)
+@click.option("-l", "--logging", help="Logging level.", type=int, default=LOGLEVEL, show_default=True)
 @click.argument(
     "wsgi_app_import_string",
     type=str,
@@ -78,12 +78,12 @@ def run_from_cli(host, port, wsgi_app_import_string, logging):
 
     print_server_details(host, port)
     print(f"Server listening at http://{host}:{port}")
-    _fastwsgi.run_server(wsgi_app, host, port, BACKLOG, int(logging))
+    _fastwsgi.run_server(wsgi_app, host, port, BACKLOG, logging)
 
 
-def run(wsgi_app, host=HOST, port=PORT, backlog=1024):
+def run(wsgi_app, host=HOST, port=PORT, backlog=1024, loglevel=LOGLEVEL):
     print_server_details(host, port)
     print(f"Server listening at http://{host}:{port}")
     print(f"Running on PID:", os.getpid())
-    _fastwsgi.run_server(wsgi_app, host, port, backlog, LOGGING)
+    _fastwsgi.run_server(wsgi_app, host, port, backlog, loglevel)
     # run_multi_process_server(wsgi_app)

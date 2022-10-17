@@ -4,32 +4,30 @@
 #include "constants.h"
 #include "start_response.h"
 
-static void reprint(PyObject* obj) {
+PyObject* base_dict = NULL;
+
+void logrepr(int level, PyObject* obj) {
     PyObject* repr = PyObject_Repr(obj);
     PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
     const char* bytes = PyBytes_AS_STRING(str);
-
-    printf("REPR: %s\n", bytes);
-
+    LOGX(level, "REPR: %s", bytes);
     Py_XDECREF(repr);
     Py_XDECREF(str);
 }
 
 static void set_header(PyObject* headers, const char* key, const char* value, size_t length) {
-    logger("setting header");
+    LOGi("setting header");
     int vlen = (length > 0) ? (int)length : (int)strlen(value);
     PyObject* item = PyUnicode_FromStringAndSize(value, vlen);
 
     PyObject* existing_item = PyDict_GetItemString(headers, key);
     if (existing_item) {
-        PyObject* comma = PyUnicode_FromString(",");
         PyObject* value_list = Py_BuildValue("[SS]", existing_item, item);
-        PyObject* updated_item = PyUnicode_Join(comma, value_list);
+        PyObject* updated_item = PyUnicode_Join(g_cv.comma, value_list);
 
         PyDict_SetItemString(headers, key, updated_item);
         Py_DECREF(updated_item);
         Py_DECREF(value_list);
-        Py_DECREF(comma);
     }
     else {
         PyDict_SetItemString(headers, key, item);
@@ -38,41 +36,30 @@ static void set_header(PyObject* headers, const char* key, const char* value, si
 }
 
 int on_message_begin(llhttp_t* parser) {
-    logger("on message begin");
+    LOGi("on message begin");
     client_t * client = (client_t *)parser->data;
     client->request.state.keep_alive = 0;
     client->request.state.error = 0;
-    if (client->response.buffer.base)
-        free(client->response.buffer.base);
-    client->response.buffer.base = NULL;
-    client->response.buffer.len = 0;
+    client->response.buf.size = 0;
     if (client->request.headers == NULL) {
         PyObject* headers = PyDict_Copy(base_dict);
         // Sets up base request dict for new incoming requests
         // https://www.python.org/dev/peps/pep-3333/#specification-details
-        PyObject* io = PyImport_ImportModule("io");
-        PyObject* BytesIO = PyUnicode_FromString("BytesIO");
-        PyObject* io_BytesIO = PyObject_CallMethodObjArgs(io, BytesIO, NULL);
-        PyDict_SetItem(headers, wsgi_input, io_BytesIO);
+        PyObject* io_BytesIO = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
+        PyDict_SetItem(headers, g_cv.wsgi_input, io_BytesIO);
         client->request.headers = headers;
-        Py_DECREF(BytesIO);
-        Py_DECREF(io);
     } else {
-        PyObject* input = PyDict_GetItem(client->request.headers, wsgi_input);
-        PyObject* truncate = PyUnicode_FromString("truncate");
-        PyObject* result1 = PyObject_CallMethodObjArgs(input, truncate, PyLong_FromLong(0L), NULL);
-        Py_DECREF(truncate);
+        PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
+        PyObject* result1 = PyObject_CallMethodObjArgs(input, g_cv.truncate, PyLong_FromLong(0L), NULL);
         Py_DECREF(result1);
-        PyObject* seek = PyUnicode_FromString("seek");
-        PyObject* result2 = PyObject_CallMethodObjArgs(input, seek, PyLong_FromLong(0L), NULL);
-        Py_DECREF(seek);
+        PyObject* result2 = PyObject_CallMethodObjArgs(input, g_cv.seek, PyLong_FromLong(0L), NULL);
         Py_DECREF(result2);
     }
     return 0;
 };
 
 int on_url(llhttp_t* parser, const char* data, size_t length) {
-    logger("on url");
+    LOGi("on url");
     client_t * client = (client_t *)parser->data;
 
     char* url = malloc(length + 1);
@@ -91,15 +78,14 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
 };
 
 int on_body(llhttp_t* parser, const char* body, size_t length) {
-    logger("on body");
+    LOGi("on body (len = %d)", (int)length);
     client_t * client = (client_t *)parser->data;
 
-    PyObject* input = PyDict_GetItem(client->request.headers, wsgi_input);
+    PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
 
-    PyObject* write = PyUnicode_FromString("write");
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
-    PyObject* result = PyObject_CallMethodObjArgs(input, write, body_content, NULL);
-    Py_DECREF(write);
+    LOGREPR(LL_TRACE, body_content);
+    PyObject* result = PyObject_CallMethodObjArgs(input, g_cv.write, body_content, NULL);
     Py_XDECREF(result);
     Py_XDECREF(body_content);
 
@@ -107,14 +93,18 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
 };
 
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
-    logger("on header field");
+    LOGi("on header field");
     client_t * client = (client_t *)parser->data;
+    client->request.current_header[0] = 0;   // CVE-2015-0219
 
-    char* upperHeader = malloc(length + 1);
+    const size_t max_len = sizeof(client->request.current_header) - 1;
+    if (length >= max_len - 8)
+        return 0;
+
+    char upperHeader[sizeof(client->request.current_header)];
     for (size_t i = 0; i < length; i++) {
         char current = header[i];
         if (current == '_') {
-            client->request.current_header = NULL;  // CVE-2015-0219
             return 0;
         }
         if (current == '-') {
@@ -125,32 +115,27 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
         }
     }
     upperHeader[length] = 0;
-    char* old_header = client->request.current_header;
 
     if ((strcmp(upperHeader, "CONTENT_LENGTH") == 0) || (strcmp(upperHeader, "CONTENT_TYPE") == 0)) {
-        client->request.current_header = upperHeader;
+        strcpy(client->request.current_header, upperHeader);
     }
     else {
-        client->request.current_header = malloc(strlen(upperHeader) + 5);
-        sprintf(client->request.current_header, "HTTP_%s", upperHeader);
+        strcpy(client->request.current_header, "HTTP_");
+        strcat(client->request.current_header, upperHeader);
     }
-
-    if (old_header)
-        free(old_header);
-
     return 0;
 };
 
 int on_header_value(llhttp_t* parser, const char* value, size_t length) {
-    logger("on header value");
+    LOGi("on header value");
     client_t * client = (client_t *)parser->data;
-    if (client->request.current_header != NULL) {
+    if (client->request.current_header[0]) {
         set_header(client->request.headers, client->request.current_header, value, length);
     }
     return 0;
 };
 
-void set_type_error(char* type) {
+void set_type_error(const char* type) {
     PyErr_Format(
         PyExc_TypeError, "response type should be bytes or a byte iterator, got '%s'", type
     );
@@ -197,28 +182,26 @@ PyObject* extract_response(PyObject* wsgi_response) {
 }
 
 int on_message_complete(llhttp_t* parser) {
-    logger("on message complete");
+    LOGi("on message complete");
     client_t * client = (client_t *)parser->data;
     PyObject * headers = client->request.headers;
 
     // Sets the input byte stream position back to 0
-    PyObject* body = PyDict_GetItem(headers, wsgi_input);
-    PyObject* seek = PyUnicode_FromString("seek");
-    PyObject* res = PyObject_CallMethodObjArgs(body, seek, PyLong_FromLong(0L), NULL);
+    PyObject* body = PyDict_GetItem(headers, g_cv.wsgi_input);
+    PyObject* res = PyObject_CallMethodObjArgs(body, g_cv.seek, PyLong_FromLong(0L), NULL);
     Py_DECREF(res);
-    Py_DECREF(seek);
 
     build_wsgi_environ(parser);
 
     StartResponse* start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
     start_response->called = 0;
 
-    logger("calling wsgi application");
+    LOGi("calling wsgi application");
     PyObject* wsgi_response;
     wsgi_response = PyObject_CallFunctionObjArgs(
-        wsgi_app, headers, start_response, NULL
+        g_srv.wsgi_app, headers, start_response, NULL
     );
-    logger("called wsgi application");
+    LOGi("called wsgi application");
 
     if (PyErr_Occurred()) {
         client->request.state.error = 1;
@@ -249,89 +232,95 @@ int on_message_complete(llhttp_t* parser) {
     return 0;
 };
 
-void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
-    // This function needs a clean up
+int build_response_ex(void * _client, int flags, int status, const void * headers, const char * body, int body_size) {
+    client_t * client = (client_t *)_client;
+    xbuf_t * xbuf = &client->response.buf;
+    xbuf->size = 0;   // reset buffer
+    StartResponse * response = NULL;
+    if (flags & RF_HEADERS_PYLIST) {
+        response = (StartResponse *)headers;
+        headers = NULL;
+    }
+    if (response) {
+        size_t status_len = 0;
+        const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
+        status = atoi(status_code);
+    }
+    if (status == 204 || status == 304)
+        body_size = 0;  // response has no content
 
-    logger("building response");
-    client_t * client = (client_t *)parser->data;
+    const char * status_name = llhttp_status_name(status);
+    if (!status_name)
+        return -1;
 
-    int response_has_no_content = 0;
+    char * buf = xbuf_expand(xbuf, 128);
+    xbuf->size += sprintf(buf, "HTTP/1.1 %d %s\r\n", status, status_name);
 
-    PyObject* status = PyUnicode_AsUTF8String(response->status);
-    char* status_code = PyBytes_AS_STRING(status);
-    if (strncmp(status_code, "204", 3) == 0 || strncmp(status_code, "304", 3) == 0) {
-        response_has_no_content = 1;
+    if (flags & RF_SET_KEEP_ALIVE) {
+        xbuf_add_str(xbuf, "Connection: Keep-Alive\r\n");
+    } else {
+        xbuf_add_str(xbuf, "Connection: close\r\n");
     }
 
-    char* buf = malloc(strlen(status_code) + 10);
-    sprintf(buf, "HTTP/1.1 %s", status_code);
-    Py_DECREF(status);
+    if (response) {
+        Py_ssize_t hsize = PyList_GET_SIZE(response->headers);
+        for (Py_ssize_t i = 0; i < hsize; i++) {
+            PyObject* tuple = PyList_GET_ITEM(response->headers, i);
 
-    char* connection_header = "\r\nConnection: close";
-    if (llhttp_should_keep_alive(parser)) {
-        connection_header = "\r\nConnection: Keep-Alive";
-        client->request.state.keep_alive = 1;
-    }
-    char* old_buf = buf;
-    buf = malloc(strlen(old_buf) + strlen(connection_header));
-    sprintf(buf, "%s%s", old_buf, connection_header);
-    free(old_buf);
+            size_t key_len = 0;
+            const char * key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
 
-    int content_length_header_present = 0;
-    for (Py_ssize_t i = 0; i < PyList_GET_SIZE(response->headers); i++) {
-        PyObject* tuple = PyList_GET_ITEM(response->headers, i);
+            if (key_len == 14 && key[7] == '-')
+                if (strcasecmp(key, "Content-Length") == 0)
+                    continue;  // skip "Content-Length" header
 
-        PyObject* field = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 0));
-        PyObject* value = PyUnicode_AsUTF8String(PyTuple_GET_ITEM(tuple, 1));
+            size_t value_len = 0;
+            const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
-        char* header_field = PyBytes_AS_STRING(field);
-        char* header_value = PyBytes_AS_STRING(value);
+            xbuf_add(xbuf, key, key_len);
+            xbuf_add(xbuf, ": ", 2);
+            xbuf_add(xbuf, value, value_len);
+            xbuf_add(xbuf, "\r\n", 2);
 
-        if (!content_length_header_present)
-            if (strcasecmp("Content-Length", header_field) == 0)
-                content_length_header_present = 1;
-
-        char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + strlen(header_field) + strlen(header_value) + 5);
-        sprintf(buf, "%s\r\n%s: %s", old_buf, header_field, header_value);
-        free(old_buf);
-
-        Py_DECREF(field);
-        Py_DECREF(value);
-
-        logger("added header");
-    }
-
-    if (response_has_no_content) {
-        char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + 26);
-        sprintf(buf, "%s\r\nContent-Length: 0\r\n\r\n", old_buf);
-        free(old_buf);
-    }
-    else {
-        char* response_body_str = PyBytes_AS_STRING(response_body);
-
-        if (content_length_header_present == 0) {
-            char* old_buf = buf;
-            buf = malloc(strlen(old_buf) + 32);
-            sprintf(buf, "%s\r\nContent-Length: %ld", old_buf, strlen(response_body_str));
-            free(old_buf);
+            LOGi("added header \"%s: %s\"", key, value);
         }
-
-        char* old_buf = buf;
-        buf = malloc(strlen(old_buf) + strlen(response_body_str) + 5);
-        sprintf(buf, "%s\r\n\r\n%s", old_buf, response_body_str);
-        free(old_buf);
+    }
+    else if (headers) {
+        xbuf_add_str(xbuf, (const char *)headers);
     }
 
-    logger(buf);
-    client->response.buffer.base = buf;
-    client->response.buffer.len = strlen(buf);
+    if (!body || body_size == 0) {
+        xbuf_add_str(xbuf, "Content-Length: 0\r\n");
+        body_size = 0;
+        //LOGi("added header \"Content-Length: 0\"");
+    } else {
+        char * buf = xbuf_expand(xbuf, 48);
+        xbuf->size += sprintf(buf, "Content-Length: %d\r\n", (int)body_size);
+        //LOGi("added header \"Content-Length: %d\"", (int)body_size);
+    }
+    xbuf_add(xbuf, "\r\n", 2);  // end of headers
+    if (body && body_size)
+        xbuf_add(xbuf, body, body_size);
+
+    LOGt(xbuf->data);
+    return xbuf->size;
+}
+
+void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
+    LOGi("building response");
+    client_t * client = (client_t *)parser->data;
+    int flags = RF_HEADERS_PYLIST;
+    if (client->request.state.keep_alive)
+        flags |= RF_SET_KEEP_ALIVE;
+
+    size_t body_size = PyBytes_GET_SIZE(response_body);
+    char * body_data = PyBytes_AS_STRING(response_body);
+    build_response_ex(client, flags, 0, response, body_data, body_size);
 }
 
 
 void build_wsgi_environ(llhttp_t* parser) {
-    logger("building wsgi environ");
+    LOGi("building wsgi environ");
     client_t * client = (client_t *)parser->data;
     PyObject * headers = client->request.headers;
 
@@ -345,16 +334,16 @@ void build_wsgi_environ(llhttp_t* parser) {
 void init_request_dict() {
     // only constant values!!!
     base_dict = PyDict_New();
-    PyDict_SetItem(base_dict, SCRIPT_NAME, empty_string);
-    PyDict_SetItem(base_dict, SERVER_NAME, server_host);
-    PyDict_SetItem(base_dict, SERVER_PORT, server_port);
-    //PyDict_SetItem(base_dict, wsgi_input, io_BytesIO);   // not const!!!
-    PyDict_SetItem(base_dict, wsgi_version, version);
-    PyDict_SetItem(base_dict, wsgi_url_scheme, http_scheme);
-    PyDict_SetItem(base_dict, wsgi_errors, PySys_GetObject("stderr"));
-    PyDict_SetItem(base_dict, wsgi_run_once, Py_False);
-    PyDict_SetItem(base_dict, wsgi_multithread, Py_False);
-    PyDict_SetItem(base_dict, wsgi_multiprocess, Py_True);
+    PyDict_SetItem(base_dict, g_cv.SCRIPT_NAME, g_cv.empty_string);
+    PyDict_SetItem(base_dict, g_cv.SERVER_NAME, g_cv.server_host);
+    PyDict_SetItem(base_dict, g_cv.SERVER_PORT, g_cv.server_port);
+    //PyDict_SetItem(base_dict, g_cv.wsgi_input, io_BytesIO);   // not const!!!
+    PyDict_SetItem(base_dict, g_cv.wsgi_version, g_cv.version);
+    PyDict_SetItem(base_dict, g_cv.wsgi_url_scheme, g_cv.http_scheme);
+    PyDict_SetItem(base_dict, g_cv.wsgi_errors, PySys_GetObject("stderr"));
+    PyDict_SetItem(base_dict, g_cv.wsgi_run_once, Py_False);
+    PyDict_SetItem(base_dict, g_cv.wsgi_multithread, Py_False);
+    PyDict_SetItem(base_dict, g_cv.wsgi_multiprocess, Py_True);
 }
 
 void configure_parser_settings() {
