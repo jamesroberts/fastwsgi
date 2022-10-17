@@ -3,20 +3,6 @@ name: Tests
 on: [push, pull_request]
 
 jobs:
-  line-count:
-    name: Less than 1000 lines
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v2
-      - name: Update packages
-        run: sudo apt-get update -yq
-      - name: Install dependencies
-        run: sudo apt-get install -yq sloccount
-      - name: Verify less than 1000 lines
-        run: sloccount fastwsgi.py fastwsgi/; if [ $(sloccount fastwsgi.py fastwsgi/ | sed -n 's/.*Total Physical Source Lines of Code (SLOC)[ ]*= \([^ ]*\).*/\1/p' | tr -d ',') -gt 1000 ]; then exit 1; fi
-
   python-import:
     name: Python import
     runs-on: ubuntu-latest
