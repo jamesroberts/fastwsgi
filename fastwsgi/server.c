@@ -17,7 +17,8 @@ void close_cb(uv_handle_t* handle) {
     LOGi("disconnected");
     client_t * client = (client_t *)handle;
     Py_XDECREF(client->request.headers);
-    xbuf_free(&client->response.buf);
+    xbuf_free(&client->response.head);
+    xbuf_free(&client->response.body);
     free(client);
 }
 
@@ -42,18 +43,23 @@ void write_cb(uv_write_t* req, int status) {
     free(req);
 }
 
-void stream_write(client_t * client, const void* data, size_t size) {
-    if (!data || !size) {
-        data = (const void*)client->response.buf.data;
-        size = (size_t)client->response.buf.size;
+void stream_write(client_t * client, const void* data, int size) {
+    int total_len = size;
+    if (!data || !size) {        
+        data = (const void*)client->response.head.data;
+        size = client->response.head.size;
         if (!data || size == 0)
             return;
+        total_len = size + client->response.body.size;
     }
+    LOGi("send_response %d bytes", total_len);
     size_t req_size = _Py_SIZE_ROUND_UP(sizeof(write_req_t), 16);
-    write_req_t* req = (write_req_t*)malloc(req_size + size);
+    write_req_t* req = (write_req_t*)malloc(req_size + total_len);
     req->buf.base = (char *)req + req_size;
-    req->buf.len = size;
+    req->buf.len = total_len;
     memcpy(req->buf.base, data, size);
+    if (total_len > size)
+        memcpy(req->buf.base + size, client->response.body.data, client->response.body.size);
     uv_write((uv_write_t*)req, (uv_stream_t*)client, &req->buf, 1, write_cb);
 }
 
@@ -80,8 +86,8 @@ void send_error(client_t * client, int status, const char* error_string) {
 }
 
 void send_response(client_t * client) {
-    LOGi("send_response %d bytes", client->response.buf.size);
-    stream_write(client, NULL, 0);
+    if (client->response.head.size > 0)
+        stream_write(client, NULL, 0);
     if (!client->request.state.keep_alive)
         shutdown_connection((uv_stream_t*)client);
 }
@@ -92,8 +98,11 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
 
-    if (client->response.buf.data == NULL)
-        xbuf_init(&client->response.buf, NULL, 64*1024);
+    if (client->response.head.data == NULL)
+        xbuf_init(&client->response.head, NULL, 2*1024);
+
+    if (client->response.body.data == NULL)
+        xbuf_init(&client->response.body, NULL, 64*1024);
 
     if (nread > 0) {
         if ((ssize_t)buf->len > nread)
@@ -102,8 +111,8 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         LOGt(buf->base);
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
-            LOGi("Successfully parsed (response len = %d)", client->response.buf.size);
-            if (client->response.buf.size > 0)
+            LOGi("Successfully parsed (response len = %d+%d)", client->response.head.size, client->response.body.size);
+            if (client->response.head.size > 0)
                 send_response(client);
             else if (client->request.state.error)
                 send_error(client, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL);

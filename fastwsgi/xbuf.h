@@ -84,6 +84,14 @@ int xbuf_add_str(xbuf_t * buf, const char * str)
 }
 
 INLINE
+void xbuf_reset(xbuf_t * buf)
+{
+    buf->size = 0;
+}
+
+#define XBUF_RESET(_buf_) xbuf_reset(&(_buf_))
+
+INLINE
 void xbuf_free(xbuf_t * buf)
 {
     if (buf->data)

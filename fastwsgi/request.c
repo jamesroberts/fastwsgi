@@ -6,6 +6,8 @@
 
 PyObject* base_dict = NULL;
 
+void build_response(client_t * client, StartResponse* response);
+
 void logrepr(int level, PyObject* obj) {
     PyObject* repr = PyObject_Repr(obj);
     PyObject* str = PyUnicode_AsEncodedString(repr, "utf-8", "~E~");
@@ -40,7 +42,8 @@ int on_message_begin(llhttp_t* parser) {
     client_t * client = (client_t *)parser->data;
     client->request.state.keep_alive = 0;
     client->request.state.error = 0;
-    client->response.buf.size = 0;
+    XBUF_RESET(client->response.head);
+    XBUF_RESET(client->response.body);
     if (client->request.headers == NULL) {
         PyObject* headers = PyDict_Copy(base_dict);
         // Sets up base request dict for new incoming requests
@@ -135,7 +138,9 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     return 0;
 };
 
-void set_type_error(const char* type) {
+void set_type_error(PyObject* obj) {
+    const char * type = Py_TYPE(obj)->tp_name;
+    LOGe("response type should be bytes or a byte iterator, got '%s'", type);
     PyErr_Format(
         PyExc_TypeError, "response type should be bytes or a byte iterator, got '%s'", type
     );
@@ -147,38 +152,48 @@ void close_iterator(PyObject* iterator) {
         if (close != NULL) {
             PyObject* close_result = PyObject_CallObject(close, NULL);
             Py_XDECREF(close_result);
+            Py_XDECREF(close);
         }
-        Py_XDECREF(close);
     }
 }
 
-PyObject* extract_response(PyObject* wsgi_response) {
+int extract_response(client_t * client, PyObject * wsgi_response) {
+    int err = 0;
     PyObject* iterator = NULL;
     PyObject* response = NULL;
     PyObject* item = NULL;
-
+    xbuf_t * body = &client->response.body;
+    xbuf_reset(body);  // reset body buffer
+    
     if (PyBytes_CheckExact(wsgi_response)) {
-        return wsgi_response;
+        Py_ssize_t size = PyBytes_GET_SIZE(wsgi_response);
+        xbuf_add(body, PyBytes_AS_STRING(wsgi_response), size);
+        return (int)size;
     }
-
+    // wsgi_body types: ClosingIterator, FileWrapper
+    LOGd("wsgi_body: type = %s", Py_TYPE(wsgi_response)->tp_name);
+    //LOGd_IF(PyIter_Check(wsgi_response), "wsgi_body is ITERATOR!");
     iterator = PyObject_GetIter(wsgi_response);
     if (iterator != NULL && PyIter_Check(iterator)) {
-        response = PyBytes_FromString("");
-        while ((item = PyIter_Next(iterator))) {
+        while (item = PyIter_Next(iterator)) {
             if (!PyBytes_CheckExact(item)) {
-                Py_DECREF(response);
-                response = NULL;
+                err = -1;
+                LOGe("wsgi_body: contain item type = '%s' (expected bytes)", Py_TYPE(item)->tp_name);
+                Py_DECREF(item);
                 break;
             }
-            PyBytes_ConcatAndDel(&response, item);
+            Py_ssize_t size = PyBytes_GET_SIZE(item);
+            LOGd("wsgi_body: get bytes size = %d", (int)size);
+            xbuf_add(body, PyBytes_AS_STRING(item), size);
+            Py_DECREF(item);
         }
         close_iterator(iterator);
         Py_XDECREF(iterator);
     }
-    if (response == NULL) {
-        set_type_error(Py_TYPE(wsgi_response)->tp_name);    
+    if (err) {
+        set_type_error(wsgi_response);
     }
-    return response;
+    return err ? err : body->size;
 }
 
 int on_message_complete(llhttp_t* parser) {
@@ -209,11 +224,10 @@ int on_message_complete(llhttp_t* parser) {
     }
 
     if (client->request.state.error == 0) {
-        PyObject* response_body = extract_response(wsgi_response);
-        if (response_body != NULL) {
-            build_response(response_body, start_response, parser);
+        int len = extract_response(client, wsgi_response);
+        if (len >= 0) {
+            build_response(client, start_response);
         }
-        Py_CLEAR(response_body);
     }
 
     // FIXME: Try to not repeat this block in this method
@@ -232,35 +246,38 @@ int on_message_complete(llhttp_t* parser) {
     return 0;
 };
 
-int build_response_ex(void * _client, int flags, int status, const void * headers, const char * body, int body_size) {
+int build_response_ex(void * _client, int flags, int status, const void * headers, const void * body_data, int body_size) {
     client_t * client = (client_t *)_client;
-    xbuf_t * xbuf = &client->response.buf;
-    xbuf->size = 0;   // reset buffer
+    xbuf_t * head = &client->response.head;
+    xbuf_reset(head);   // reset headers buffer
+    xbuf_t * body = &client->response.body;
     StartResponse * response = NULL;
+
     if (flags & RF_HEADERS_PYLIST) {
         response = (StartResponse *)headers;
         headers = NULL;
     }
     if (response) {
+        char scode[4];
         size_t status_len = 0;
         const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
-        status = atoi(status_code);
+        if (status_len < 3)
+            return -2;
+        memcpy(scode, status_code, 4);
+        scode[3] = 0;
+        status = atoi(scode);
     }
-    if (status == 204 || status == 304)
-        body_size = 0;  // response has no content
+    if (status == 204 || status == 304) {
+        body_size = 0;
+        xbuf_reset(body);  // forced reset body buffer
+    }
 
     const char * status_name = llhttp_status_name(status);
     if (!status_name)
-        return -1;
+        return -3;
 
-    char * buf = xbuf_expand(xbuf, 128);
-    xbuf->size += sprintf(buf, "HTTP/1.1 %d %s\r\n", status, status_name);
-
-    if (flags & RF_SET_KEEP_ALIVE) {
-        xbuf_add_str(xbuf, "Connection: Keep-Alive\r\n");
-    } else {
-        xbuf_add_str(xbuf, "Connection: close\r\n");
-    }
+    char * buf = xbuf_expand(head, 128);
+    head->size += sprintf(buf, "HTTP/1.1 %d %s\r\n", status, status_name);
 
     if (response) {
         Py_ssize_t hsize = PyList_GET_SIZE(response->headers);
@@ -277,45 +294,57 @@ int build_response_ex(void * _client, int flags, int status, const void * header
             size_t value_len = 0;
             const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
-            xbuf_add(xbuf, key, key_len);
-            xbuf_add(xbuf, ": ", 2);
-            xbuf_add(xbuf, value, value_len);
-            xbuf_add(xbuf, "\r\n", 2);
+            xbuf_add(head, key, key_len);
+            xbuf_add(head, ": ", 2);
+            xbuf_add(head, value, value_len);
+            xbuf_add(head, "\r\n", 2);
 
-            LOGi("added header \"%s: %s\"", key, value);
+            LOGi("added header '%s: %s'", key, value);
         }
     }
     else if (headers) {
-        xbuf_add_str(xbuf, (const char *)headers);
+        xbuf_add_str(head, (const char *)headers);
     }
 
-    if (!body || body_size == 0) {
-        xbuf_add_str(xbuf, "Content-Length: 0\r\n");
-        body_size = 0;
-        //LOGi("added header \"Content-Length: 0\"");
+    if (flags & RF_SET_KEEP_ALIVE) {
+        xbuf_add_str(head, "Connection: Keep-Alive\r\n");
     } else {
-        char * buf = xbuf_expand(xbuf, 48);
-        xbuf->size += sprintf(buf, "Content-Length: %d\r\n", (int)body_size);
-        //LOGi("added header \"Content-Length: %d\"", (int)body_size);
+        xbuf_add_str(head, "Connection: close\r\n");
     }
-    xbuf_add(xbuf, "\r\n", 2);  // end of headers
-    if (body && body_size)
-        xbuf_add(xbuf, body, body_size);
 
-    LOGt(xbuf->data);
-    return xbuf->size;
+    if (body_size < 0) {
+        body_data = body->data;
+        body_size = body->size;
+    } else {
+        xbuf_reset(body);  // reset body buffer
+        if (body_data && body_size > 0)
+            xbuf_add(body, body_data, body_size);
+    }
+
+    if (body_size == 0) {
+        xbuf_add_str(head, "Content-Length: 0\r\n");
+        LOGi("Added Header 'Content-Length: 0'");
+    } else {
+        char * buf = xbuf_expand(head, 48);
+        head->size += sprintf(buf, "Content-Length: %d\r\n", (int)body_size);
+        LOGi("Added Header 'Content-Length: %d'", (int)body_size);
+    }
+    xbuf_add(head, "\r\n", 2);  // end of headers
+
+    LOGt(head->data);
+    LOGt_IF(body->size > 0, body->data);
+    return head->size;
 }
 
-void build_response(PyObject* response_body, StartResponse* response, llhttp_t* parser) {
+void build_response(client_t * client, StartResponse* response) {
     LOGi("building response");
-    client_t * client = (client_t *)parser->data;
     int flags = RF_HEADERS_PYLIST;
     if (client->request.state.keep_alive)
         flags |= RF_SET_KEEP_ALIVE;
 
-    size_t body_size = PyBytes_GET_SIZE(response_body);
-    char * body_data = PyBytes_AS_STRING(response_body);
-    build_response_ex(client, flags, 0, response, body_data, body_size);
+    int len = build_response_ex(client, flags, 0, response, NULL, -1);
+    if (len <= 0)
+        client->request.state.error = 1;
 }
 
 

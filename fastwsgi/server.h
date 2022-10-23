@@ -7,12 +7,12 @@
 #include "xbuf.h"
 
 typedef struct {
-    uv_write_t req;
+    uv_write_t req;  // Placement strictly at the beginning of the structure!
     uv_buf_t buf;
 } write_req_t;
 
 typedef struct {
-    uv_tcp_t server;
+    uv_tcp_t server;  // Placement strictly at the beginning of the structure!
     uv_loop_t* loop;
     uv_os_fd_t file_descriptor;
     PyObject* wsgi_app;
@@ -37,7 +37,8 @@ typedef struct {
         RequestState state;
     } request;
     struct {
-        xbuf_t buf;
+        xbuf_t head;
+        xbuf_t body;
     } response;
 } client_t;
 
