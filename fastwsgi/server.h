@@ -8,7 +8,9 @@
 
 typedef struct {
     uv_write_t req;  // Placement strictly at the beginning of the structure!
-    uv_buf_t buf;
+    void * client;   // NULL = not sending
+    uv_buf_t head;
+    uv_buf_t body;
 } write_req_t;
 
 typedef struct {
@@ -39,6 +41,7 @@ typedef struct {
     struct {
         xbuf_t head;
         xbuf_t body;
+        write_req_t write_req;
     } response;
 } client_t;
 

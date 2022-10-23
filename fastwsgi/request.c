@@ -42,6 +42,11 @@ int on_message_begin(llhttp_t* parser) {
     client_t * client = (client_t *)parser->data;
     client->request.state.keep_alive = 0;
     client->request.state.error = 0;
+    if (client->response.write_req.client != NULL) {
+        client->request.state.error = 1;
+        LOGc("Received new HTTP request while sending response! Disconnect client!");
+        return -1;
+    }
     XBUF_RESET(client->response.head);
     XBUF_RESET(client->response.body);
     if (client->request.headers == NULL) {
