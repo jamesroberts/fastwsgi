@@ -69,19 +69,22 @@ int on_message_begin(llhttp_t* parser) {
 int on_url(llhttp_t* parser, const char* data, size_t length) {
     LOGi("on url");
     client_t * client = (client_t *)parser->data;
-
-    char* url = malloc(length + 1);
-    strncpy(url, data, length);
-    url[length] = 0;
-
-    char* query_string = strchr(url, '?');
-    if (query_string) {
-        *query_string = 0;
-        set_header(client->request.headers, "QUERY_STRING", query_string + 1, strlen(query_string + 1));
+    size_t path_len = length;
+    const char* query = NULL;
+    size_t query_len = 0;
+    for (size_t i = 0; i < length; i++) {
+        if (data[i] == '?') {
+            path_len = i;
+            query_len = length - i - 1;
+            if (query_len > 0)
+                query = data + i + 1;
+            break;
+        }
     }
-    set_header(client->request.headers, "PATH_INFO", url, strlen(url));
-
-    free(url);
+    if (query) {
+        set_header(client->request.headers, "QUERY_STRING", query, query_len);
+    }
+    set_header(client->request.headers, "PATH_INFO", data, path_len);
     return 0;
 };
 
