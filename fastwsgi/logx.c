@@ -40,16 +40,16 @@ void logmsg(int level, const char * fmt, ...)
     if (level <= g_log_level) {
         va_list argptr;
         va_start(argptr, fmt);
-        const size_t prefix_len = sizeof(log_prefix);  // include space
+        const int prefix_len = sizeof(log_prefix);     // include space
         memcpy(buf, log_prefix, prefix_len);           // add prefix
         buf[prefix_len - 3] = g_log_level_str[level];  // replace X to error type
         buf[prefix_len - 1] = 0x20;                    // add space delimiter
-        int len = vsnprintf(buf + prefix_len, sizeof(buf) - prefix_len - 8, fmt, argptr);
+        int maxlen = sizeof(buf) - prefix_len - 8;
+        int len = vsnprintf(buf + prefix_len, maxlen, fmt, argptr);
         va_end(argptr);
         if (len < 0) {
-            strcat(buf, "<INCORRECT-INPUT-DATA> ");
-            strcat(buf, fmt);
-            len = strlen(buf);
+            buf[maxlen] = 0;
+            len = (int)strlen(buf);
         } else {
             len += prefix_len;
             buf[len] = 0;
