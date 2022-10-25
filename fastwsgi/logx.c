@@ -48,7 +48,7 @@ void logmsg(int level, const char * fmt, ...)
         int len = vsnprintf(buf + prefix_len, maxlen, fmt, argptr);
         va_end(argptr);
         if (len < 0) {
-            buf[maxlen] = 0;
+            buf[prefix_len + maxlen] = 0;
             len = (int)strlen(buf);
         } else {
             len += prefix_len;

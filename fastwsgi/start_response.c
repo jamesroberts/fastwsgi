@@ -9,7 +9,7 @@ void set_status_error() {
 void set_header_tuple_error() {
     char* err_msg = "start_response argument 2 expects a list of 2-tuples (str, str)";
     PyErr_SetString(PyExc_TypeError, err_msg);
-};
+}
 
 void set_header_list_error(PyObject* headers) {
     PyErr_Format(
@@ -17,7 +17,7 @@ void set_header_list_error(PyObject* headers) {
         "start_response argument 2 expects a list of 2-tuples, got '%s' instead.",
         Py_TYPE(headers)->tp_name
     );
-};
+}
 
 void set_exc_info_type_error(PyObject* exc_info) {
     PyErr_Format(
@@ -25,18 +25,18 @@ void set_exc_info_type_error(PyObject* exc_info) {
         "start_response argument 3 expects a 3-tuple, got '%s' instead.",
         Py_TYPE(exc_info)->tp_name
     );
-};
+}
 
 void set_exc_info_missing_error() {
     char* err_msg = "'exc_info' is required in the second call of 'start_response'";
     PyErr_SetString(PyExc_TypeError, err_msg);
-};
+}
 
 bool is_valid_status(PyObject* status) {
     bool valid = PyUnicode_Check(status) && PyUnicode_GET_LENGTH(status) >= 3;
     if (!valid) set_status_error();
     return valid;
-};
+}
 
 bool is_valid_header_tuple(PyObject* tuple) {
     bool valid = false;
@@ -63,7 +63,7 @@ bool is_valid_headers(PyObject* headers) {
         if (!valid) break;
     }
     return valid;
-};
+}
 
 bool is_valid_exc_info(StartResponse* sr) {
     bool valid = true;
@@ -77,7 +77,7 @@ bool is_valid_exc_info(StartResponse* sr) {
         valid = false;
     }
     return valid;
-};
+}
 
 PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs) {
     StartResponse* sr = (StartResponse*)self;
@@ -107,7 +107,7 @@ PyObject* start_response_call(PyObject* self, PyObject* args, PyObject* kwargs) 
     Py_XINCREF(sr->exc_info);
 
     Py_RETURN_NONE;
-};
+}
 
 PyTypeObject StartResponse_Type = {
     PyVarObject_HEAD_INIT(NULL, 0)

@@ -97,7 +97,7 @@ int on_message_begin(llhttp_t* parser) {
         Py_DECREF(result2);
     }
     return 0;
-};
+}
 
 int on_url(llhttp_t* parser, const char* data, size_t length) {
     LOGi("on url");
@@ -119,7 +119,7 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
     }
     set_header(client->request.headers, "PATH_INFO", data, path_len);
     return 0;
-};
+}
 
 int on_body(llhttp_t* parser, const char* body, size_t length) {
     LOGi("on body (len = %d)", (int)length);
@@ -134,7 +134,7 @@ int on_body(llhttp_t* parser, const char* body, size_t length) {
     Py_XDECREF(body_content);
 
     return 0;
-};
+}
 
 int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     LOGi("on header field");
@@ -170,7 +170,7 @@ int on_header_field(llhttp_t* parser, const char* header, size_t length) {
     }
     strcat(client->request.current_header, upperHeader);
     return 0;
-};
+}
 
 int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     LOGi("on header value");
@@ -179,7 +179,7 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
         set_header(client->request.headers, client->request.current_header, value, length);
     }
     return 0;
-};
+}
 
 void close_iterator(PyObject* iterator)
 {
@@ -409,7 +409,7 @@ fin:
 
     Py_CLEAR(client->request.headers);
     return 0;
-};
+}
 
 int build_response_ex(void * _client, int flags, int status, const void * headers, const void * body_data, int body_size)
 {
