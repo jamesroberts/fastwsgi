@@ -119,12 +119,12 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
             LOGi("Successfully parsed (response len = %d+%d)", client->response.head.size, client->response.body_preloaded_size);
-            if (client->response.head.size > 0)
-                send_response(client);
-            else if (client->request.state.error)
+            if (client->request.state.error)
                 send_error(client, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL);
+            else if (client->response.head.size > 0)
+                send_response(client);
             else
-                continue_read = 1;
+                continue_read = 1;  // response not sended to client!
         }
         else {
             LOGe("Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);
