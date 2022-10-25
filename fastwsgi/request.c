@@ -87,10 +87,11 @@ int on_message_begin(llhttp_t* parser) {
         // Sets up base request dict for new incoming requests
         // https://www.python.org/dev/peps/pep-3333/#specification-details
         PyObject* io_BytesIO = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
-        PyDict_SetItem(headers, g_cv.wsgi_input, io_BytesIO);
+        PyDict_SetItem(headers, g_cv.wsgi_input, io_BytesIO);  // io_BytesIO increased refcnt (1 -> 2)
+        Py_DECREF(io_BytesIO);
         client->request.headers = headers;
     } else {
-        PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
+        PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input); // not decrease refcnt!!!
         PyObject* result1 = PyObject_CallMethodObjArgs(input, g_cv.truncate, PyLong_FromLong(0L), NULL);
         Py_DECREF(result1);
         PyObject* result2 = PyObject_CallMethodObjArgs(input, g_cv.seek, PyLong_FromLong(0L), NULL);
@@ -406,8 +407,6 @@ fin:
     Py_CLEAR(start_response->status);
     Py_CLEAR(start_response->exc_info);
     Py_CLEAR(start_response);
-
-    Py_CLEAR(client->request.headers);
     return 0;
 }
 
