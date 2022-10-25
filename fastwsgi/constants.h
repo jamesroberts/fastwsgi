@@ -38,6 +38,8 @@ typedef struct {
     PyObject* seek;
     PyObject* getvalue;
     PyObject* comma;
+
+    PyObject* i0;
 } cvar_t;
 
 extern cvar_t g_cv;

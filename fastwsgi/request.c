@@ -44,6 +44,26 @@ static void set_header(PyObject* headers, const char* key, const char* value, ss
     Py_DECREF(item);
 }
 
+int reset_wsgi_input(client_t * client)
+{
+    if (client->request.headers == NULL) {
+        client->request.headers = PyDict_Copy(base_dict);
+        // Sets up base request dict for new incoming requests
+        // https://www.python.org/dev/peps/pep-3333/#specification-details
+    }
+    PyObject* wsgi_input = client->request.wsgi_input;
+    if (wsgi_input == NULL) {
+        wsgi_input = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
+        PyDict_SetItem(client->request.headers , g_cv.wsgi_input, wsgi_input);  // wsgi_input: increased refcnt (1 -> 2)
+        client->request.wsgi_input = wsgi_input;  // refcnt = 2
+    } else {
+        PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
+        Py_DECREF(result);
+    }
+    client->request.wsgi_input_size = 0;
+    return 0;
+}
+
 void reset_response_body(void * _client)
 {
     client_t * client = (client_t *)_client;
@@ -79,24 +99,10 @@ int on_message_begin(llhttp_t* parser) {
         LOGc("Received new HTTP request while sending response! Disconnect client!");
         return -1;
     }
+    reset_wsgi_input(client);
     xbuf_reset(&client->response.head);
     reset_response_body(client);
     client->response.wsgi_content_length = -1;
-    if (client->request.headers == NULL) {
-        PyObject* headers = PyDict_Copy(base_dict);
-        // Sets up base request dict for new incoming requests
-        // https://www.python.org/dev/peps/pep-3333/#specification-details
-        PyObject* io_BytesIO = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
-        PyDict_SetItem(headers, g_cv.wsgi_input, io_BytesIO);  // io_BytesIO increased refcnt (1 -> 2)
-        Py_DECREF(io_BytesIO);
-        client->request.headers = headers;
-    } else {
-        PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input); // not decrease refcnt!!!
-        PyObject* result1 = PyObject_CallMethodObjArgs(input, g_cv.truncate, PyLong_FromLong(0L), NULL);
-        Py_DECREF(result1);
-        PyObject* result2 = PyObject_CallMethodObjArgs(input, g_cv.seek, PyLong_FromLong(0L), NULL);
-        Py_DECREF(result2);
-    }
     return 0;
 }
 
@@ -122,18 +128,29 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
     return 0;
 }
 
-int on_body(llhttp_t* parser, const char* body, size_t length) {
+int on_body(llhttp_t* parser, const char* body, size_t length)
+{
     LOGi("on body (len = %d)", (int)length);
     client_t * client = (client_t *)parser->data;
-
-    PyObject* input = PyDict_GetItem(client->request.headers, g_cv.wsgi_input);
+    if (length == 0)
+        return 0;
 
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
     LOGREPR(LL_TRACE, body_content);
-    PyObject* result = PyObject_CallMethodObjArgs(input, g_cv.write, body_content, NULL);
+    PyObject* result = PyObject_CallMethodObjArgs(client->request.wsgi_input, g_cv.write, body_content, NULL);
+    if (!PyLong_CheckExact(result)) {
+        client->request.state.error = 1;
+        LOGf("Cannot write PyBytes to wsgi_input stream! (ret = None)");
+    } else {
+        size_t rv = PyLong_AsSize_t(result);
+        if (rv != length) {
+            client->request.state.error = 1;
+            LOGf("Failed write PyBytes to wsgi_input stream! (ret = %d, expected = %d)", (int)rv, (int)length);
+        }
+    }
     Py_XDECREF(result);
     Py_XDECREF(body_content);
-
+    client->request.wsgi_input_size += (int)length;
     return 0;
 }
 
@@ -329,14 +346,21 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
 
 int on_message_complete(llhttp_t* parser) {
     LOGi("on message complete");
+    PyObject* result;
     client_t * client = (client_t *)parser->data;
     PyObject * headers = client->request.headers;
     client->response.wsgi_content_length = -1;
 
+    if (client->request.state.error)
+        goto fin;
+
+    // Truncate input byte stream to real request content length
+    result = PyObject_CallMethodObjArgs(client->request.wsgi_input, g_cv.truncate, NULL);
+    Py_DECREF(result);
+
     // Sets the input byte stream position back to 0
-    PyObject* body = PyDict_GetItem(headers, g_cv.wsgi_input);
-    PyObject* res = PyObject_CallMethodObjArgs(body, g_cv.seek, PyLong_FromLong(0L), NULL);
-    Py_DECREF(res);
+    result = PyObject_CallMethodObjArgs(client->request.wsgi_input, g_cv.seek, g_cv.i0, NULL);
+    Py_DECREF(result);
 
     build_wsgi_environ(parser);
 

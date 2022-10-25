@@ -37,4 +37,6 @@ void init_constants() {
     g_cv.seek = PyUnicode_FromString("seek");
     g_cv.getvalue = PyUnicode_FromString("getvalue");
     g_cv.comma = PyUnicode_FromString(",");
+
+    g_cv.i0 = PyLong_FromLong(0L);
 }
