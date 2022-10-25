@@ -24,4 +24,8 @@ void configure_parser_settings();
 void logrepr(int level, PyObject* obj);
 #define LOGREPR(_level_, _msg_) if (g_log_level >= _level_) logrepr(_level_, _msg_)
 
+void reset_response_body(void * client);
+void close_iterator(PyObject* iterator);
+PyObject* wsgi_iterator_get_next_chunk(void * client);
+
 #endif

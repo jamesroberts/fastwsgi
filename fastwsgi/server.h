@@ -6,11 +6,14 @@
 #include "request.h"
 #include "xbuf.h"
 
+#define max_read_file_buffer_size (25*1000*1000)  // FIXME: change to 128KB
+#define max_preloaded_body_chunks 48
+
+
 typedef struct {
     uv_write_t req;  // Placement strictly at the beginning of the structure!
     void * client;   // NULL = not sending
-    uv_buf_t head;
-    uv_buf_t body;
+    uv_buf_t bufs[max_preloaded_body_chunks + 2];
 } write_req_t;
 
 typedef struct {
@@ -39,8 +42,14 @@ typedef struct {
         RequestState state;
     } request;
     struct {
+        int wsgi_content_length; // -1 = "Content-Length" not present
         xbuf_t head;
-        xbuf_t body;
+        PyObject* wsgi_body;
+        PyObject* body_iterator;
+        int body_chunk_num;
+        PyObject* body[max_preloaded_body_chunks + 1]; // pleloaded body's chunks (PyBytes)
+        int body_preloaded_size; // sum of all preloaded body's chunks
+        int body_total_size;
         write_req_t write_req;
     } response;
 } client_t;
