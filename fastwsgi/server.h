@@ -34,7 +34,7 @@ typedef struct {
 typedef struct {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * srv;
-    char remote_addr[24];
+    char remote_addr[48];
     struct {
         size_t current_key_len;
         size_t current_val_len;

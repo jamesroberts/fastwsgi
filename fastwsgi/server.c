@@ -179,23 +179,28 @@ void connection_cb(uv_stream_t* server, int status) {
     uv_tcp_nodelay(&client->handle, 0);
     uv_tcp_keepalive(&client->handle, 1, 60);
 
-    struct sockaddr sockname;
-    struct sockaddr_in* addr = (struct sockaddr_in*)&sockname;
-    int socklen = sizeof(sockname);
-
-    uv_tcp_getsockname((uv_tcp_t*)&client->handle, &sockname, &socklen);
-    uv_ip4_name(addr, client->remote_addr, sizeof(client->remote_addr));
-
     client->handle.data = client;
 
-    if (uv_accept(server, (uv_stream_t*)&client->handle) == 0) {
-        llhttp_init(&client->request.parser, HTTP_REQUEST, &parser_settings);
-        client->request.parser.data = client;
-        uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
-    }
-    else {
+    int rc = uv_accept(server, (uv_stream_t*)&client->handle);
+    if (rc) {
         uv_close((uv_handle_t*)&client->handle, close_cb);
+        return;
     }
+    sockaddr_t sock_addr;
+    memset(&sock_addr, 0, sizeof(sock_addr));
+    int sock_len = sizeof(sock_addr);
+    rc = uv_tcp_getpeername((uv_tcp_t*)&client->handle, &sock_addr.addr, &sock_len);
+    LOGw_IF(rc, "%s: cannot get remote addr (err = %d)", __func__, rc);
+    if (rc == 0) {
+        rc = uv_ip_name(&sock_addr.addr, client->remote_addr, sizeof(client->remote_addr));
+        LOGw_IF(rc, "%s: cannot get remote IP-addr (err = %d)", __func__, rc);
+        if (rc)
+            client->remote_addr[0] = 0;
+        LOGi_IF(rc == 0, "remote IP-addr: %s", client->remote_addr);
+    }
+    llhttp_init(&client->request.parser, HTTP_REQUEST, &parser_settings);
+    client->request.parser.data = client;
+    uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
 }
 
 void signal_handler(uv_signal_t* req, int signum) {

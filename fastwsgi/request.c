@@ -659,16 +659,21 @@ void build_wsgi_environ(llhttp_t * parser)
     set_header(client, g_cv.REQUEST_METHOD, method, -1, 0);
     const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
     set_header(client, g_cv.SERVER_PROTOCOL, protocol, -1, 0);
-    set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
+    if (client->remote_addr[0])
+        set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
 }
 
 void init_request_dict()
 {
+    char buf[32];
+    sprintf(buf, "%d", g_srv.port);
+    PyObject * port = PyUnicode_FromString(buf);
+    PyObject * host = PyUnicode_FromString(g_srv.host);
     // only constant values!!!
     g_base_dict = PyDict_New();
     PyDict_SetItem(g_base_dict, g_cv.SCRIPT_NAME, g_cv.empty_string);
-    PyDict_SetItem(g_base_dict, g_cv.SERVER_NAME, g_cv.server_host);
-    PyDict_SetItem(g_base_dict, g_cv.SERVER_PORT, g_cv.server_port);
+    PyDict_SetItem(g_base_dict, g_cv.SERVER_NAME, host);
+    PyDict_SetItem(g_base_dict, g_cv.SERVER_PORT, port);
     //PyDict_SetItem(g_base_dict, g_cv.wsgi_input, io_BytesIO);   // not const!!!
     PyDict_SetItem(g_base_dict, g_cv.wsgi_version, g_cv.version);
     PyDict_SetItem(g_base_dict, g_cv.wsgi_url_scheme, g_cv.http_scheme);
@@ -676,6 +681,8 @@ void init_request_dict()
     PyDict_SetItem(g_base_dict, g_cv.wsgi_run_once, Py_False);
     PyDict_SetItem(g_base_dict, g_cv.wsgi_multithread, Py_False);
     PyDict_SetItem(g_base_dict, g_cv.wsgi_multiprocess, Py_True);
+    Py_DECREF(port);
+    Py_DECREF(host);
 }
 
 void configure_parser_settings() {
