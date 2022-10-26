@@ -18,7 +18,7 @@ void close_cb(uv_handle_t* handle) {
     client_t * client = (client_t *)handle;
     Py_XDECREF(client->request.headers);
     Py_XDECREF(client->request.wsgi_input);
-    xbuf_free(&client->response.head);
+    xbuf_free(&client->head);
     reset_response_body(client);
     free(client);
 }
@@ -46,14 +46,17 @@ void write_cb(uv_write_t* req, int status) {
     wreq->client = NULL;  // free write_req
 }
 
-void stream_write(client_t * client) {
-    if (!client->response.head.data || client->response.head.size == 0)
+void stream_write(client_t * client)
+{
+    if (client->response.headers_size == 0)
+        return; // error ???
+    if (!client->head.data || client->head.size == 0)
         return; // error ???
     write_req_t * wreq = &client->response.write_req;
     int total_len = 0;
     int nbufs = 1;
-    wreq->bufs[0].base = client->response.head.data;
-    wreq->bufs[0].len = client->response.head.size;
+    wreq->bufs[0].base = client->head.data;
+    wreq->bufs[0].len = client->head.size;
     total_len += wreq->bufs[0].len;
     if (client->response.body_preloaded_size > 0) {
         for (int i = 0; i < client->response.body_chunk_num; i++) {
@@ -97,7 +100,7 @@ void send_error(client_t * client, int status, const char* error_string) {
 }
 
 void send_response(client_t * client) {
-    if (client->response.head.size > 0)
+    if (client->head.size > 0)
         stream_write(client);
     if (!client->request.state.keep_alive)
         shutdown_connection((uv_stream_t*)client);
@@ -109,8 +112,8 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
     client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
 
-    if (client->response.head.data == NULL)
-        xbuf_init(&client->response.head, NULL, 2*1024);
+    if (client->head.data == NULL)
+        xbuf_init(&client->head, NULL, 2*1024);
 
     if (nread > 0) {
         if ((ssize_t)buf->len > nread)
@@ -119,10 +122,10 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         LOGt(buf->base);
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
-            LOGi("Successfully parsed (response len = %d+%d)", client->response.head.size, client->response.body_preloaded_size);
+            LOGi("Successfully parsed (response len = %d+%d)", client->head.size, client->response.body_preloaded_size);
             if (client->request.state.error)
                 send_error(client, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL);
-            else if (client->response.head.size > 0)
+            else if (client->response.headers_size > 0)
                 send_response(client);
             else
                 continue_read = 1;  // response not sended to client!

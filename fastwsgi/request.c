@@ -132,7 +132,8 @@ int on_message_begin(llhttp_t * parser)
     client->request.headers = PyDict_Copy(g_base_dict);
     reset_wsgi_input(client);
     PyDict_SetItem(client->request.headers, g_cv.wsgi_input, client->request.wsgi_input); // wsgi_input: refcnt 1 -> 2
-    xbuf_reset(&client->response.head);
+    xbuf_reset(&client->head);
+    client->response.headers_size = 0;
     reset_response_body(client);
     client->response.wsgi_content_length = -1;
     return 0;
@@ -456,7 +457,8 @@ fin:
         PyErr_Print();
     }
     if (client->request.state.error) {
-        xbuf_reset(&client->response.head);
+        xbuf_reset(&client->head);
+        client->response.headers_size = 0;
         reset_response_body(client);
     }
     Py_CLEAR(start_response->headers);
@@ -470,8 +472,9 @@ fin:
 int build_response_ex(void * _client, int flags, int status, const void * headers, const void * body_data, int body_size)
 {
     client_t * client = (client_t *)_client;
-    xbuf_t * head = &client->response.head;
+    xbuf_t * head = &client->head;
     xbuf_reset(head);   // reset headers buffer
+    client->response.headers_size = 0;
     PyObject** body = client->response.body;
     StartResponse * response = NULL;
 
@@ -559,6 +562,7 @@ int build_response_ex(void * _client, int flags, int status, const void * header
 
     LOGt(head->data);
     LOGt_IF(body_size > 0 && client->response.body_chunk_num, PyBytes_AS_STRING(body[0]));
+    client->response.headers_size = head->size;
     return head->size;
 }
 
@@ -571,7 +575,8 @@ void build_response(client_t * client, StartResponse* response) {
     int len = build_response_ex(client, flags, 0, response, NULL, -1);
     if (len <= 0) {
         client->request.state.error = 1;
-        xbuf_reset(&client->response.head);
+        xbuf_reset(&client->head);
+        client->response.headers_size = 0;
         reset_response_body(client);
     }
 }

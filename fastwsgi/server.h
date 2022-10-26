@@ -43,9 +43,10 @@ typedef struct {
         llhttp_t parser;
         RequestState state;
     } request;
+    xbuf_t head;  // dynamic buffer for request and response headers data
     struct {
+        int headers_size;        // size of headers for sending
         int wsgi_content_length; // -1 = "Content-Length" not present
-        xbuf_t head;
         PyObject* wsgi_body;
         PyObject* body_iterator;
         int body_chunk_num;
