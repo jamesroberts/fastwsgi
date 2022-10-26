@@ -36,10 +36,11 @@ typedef struct {
     server_t * srv;
     char remote_addr[24];
     struct {
+        size_t current_key_len;
+        size_t current_val_len;
         PyObject* headers;     // PyDict
         PyObject* wsgi_input;  // type: io.BytesIO
         int wsgi_input_size;   // total size of wsgi_input PyBytes stream
-        char current_header[128];
         llhttp_t parser;
         RequestState state;
     } request;

@@ -87,6 +87,8 @@ INLINE
 void xbuf_reset(xbuf_t * buf)
 {
     buf->size = 0;
+    if (buf->data)
+        buf->data[0] = 0;
 }
 
 #define XBUF_RESET(_buf_) xbuf_reset(&(_buf_))
