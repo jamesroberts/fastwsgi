@@ -12,6 +12,7 @@ typedef struct {
     PyObject* QUERY_STRING;
     PyObject* PATH_INFO;
     PyObject* HTTP_;
+    PyObject* REMOTE_ADDR;
 
     PyObject* wsgi_version;
     PyObject* wsgi_url_scheme;

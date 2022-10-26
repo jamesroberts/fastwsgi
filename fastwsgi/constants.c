@@ -11,6 +11,7 @@ void init_constants() {
     g_cv.QUERY_STRING = PyUnicode_FromString("QUERY_STRING");
     g_cv.PATH_INFO = Py_BuildValue("s", "PATH_INFO");
     g_cv.HTTP_ = PyUnicode_FromString("HTTP_");
+    g_cv.REMOTE_ADDR = PyUnicode_FromString("REMOTE_ADDR");
 
     g_cv.wsgi_version = PyUnicode_FromString("wsgi.version");
     g_cv.wsgi_url_scheme = PyUnicode_FromString("wsgi.url_scheme");

@@ -4,7 +4,7 @@
 #include "constants.h"
 #include "start_response.h"
 
-PyObject* base_dict = NULL;
+PyObject* g_base_dict = NULL;
 
 void build_response(client_t * client, StartResponse* response);
 int get_info_from_wsgi_response(client_t * client, StartResponse * response);
@@ -24,38 +24,64 @@ void logrepr(int level, PyObject* obj) {
     Py_XDECREF(str);
 }
 
-static void set_header(PyObject* headers, const char* key, const char* value, ssize_t length) {
-    LOGi("setting header");
+typedef enum {
+    SH_LATIN1       = 0x01,
+    SH_CONCAT       = 0x02,
+    SH_COMMA_DELIM  = 0x04
+} set_header_flag_t;
+
+static
+int set_header(client_t * client, PyObject * key, const char * value, ssize_t length, int flags)
+{
+    PyObject * headers = client->request.headers;
     ssize_t vlen = (length >= 0) ? length : strlen(value);
-    PyObject* item = PyUnicode_FromStringAndSize(value, vlen);
-
-    PyObject* existing_item = PyDict_GetItemString(headers, key);
-    if (existing_item) {
-        PyObject* value_list = Py_BuildValue("[SS]", existing_item, item);
-        PyObject* updated_item = PyUnicode_Join(g_cv.comma, value_list);
-
-        PyDict_SetItemString(headers, key, updated_item);
-        Py_DECREF(updated_item);
-        Py_DECREF(value_list);
+    LOGi("set_header: %s = '%.*s' %s", PyUnicode_AsUTF8(key), (int)vlen, value, (flags & SH_CONCAT) ? "(concat)" : "");
+    PyObject * val = NULL;
+    PyObject * setval = NULL;
+    if (flags & SH_LATIN1) {
+        val = PyUnicode_DecodeLatin1(value, vlen, NULL);
+    } else {
+        val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
     }
-    else {
-        PyDict_SetItemString(headers, key, item);
+    if (!val)
+        return -3;
+
+    if (flags & SH_CONCAT) {  // concat PyUnicode value
+        PyObject * existing_val = PyDict_GetItem(headers, key);
+        if (existing_val) {
+            if (vlen == 0) {  // skip concat empty string
+                Py_XDECREF(val);
+                return 0;
+            }
+            setval = PyUnicode_Concat(existing_val, val);
+        }
     }
-    Py_DECREF(item);
+    PyDict_SetItem(headers, key, (setval != NULL) ? setval : val);
+    Py_XDECREF(val);
+    Py_XDECREF(setval);
+    return 0;
+}
+
+static 
+int set_header_v(client_t * client, const char * key, const char * value, ssize_t length, int flags)
+{
+    if (!key)
+        return -11;
+    size_t klen = strlen(key);
+    if (klen == 0)
+        return -12;
+    PyObject * pkey = PyUnicode_FromStringAndSize(key, klen);
+    int retval = set_header(client, pkey, value, length, flags);
+    Py_DECREF(pkey);
+    return retval;
 }
 
 int reset_wsgi_input(client_t * client)
 {
-    if (client->request.headers == NULL) {
-        client->request.headers = PyDict_Copy(base_dict);
-        // Sets up base request dict for new incoming requests
-        // https://www.python.org/dev/peps/pep-3333/#specification-details
-    }
     PyObject* wsgi_input = client->request.wsgi_input;
     if (wsgi_input == NULL) {
         wsgi_input = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
-        PyDict_SetItem(client->request.headers , g_cv.wsgi_input, wsgi_input);  // wsgi_input: increased refcnt (1 -> 2)
-        client->request.wsgi_input = wsgi_input;  // refcnt = 2
+        client->request.wsgi_input = wsgi_input;
     } else {
         PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
         Py_DECREF(result);
@@ -89,8 +115,9 @@ void reset_response_body(void * _client)
     Py_CLEAR(client->response.wsgi_body);
 }
 
-int on_message_begin(llhttp_t* parser) {
-    LOGi("on message begin");
+int on_message_begin(llhttp_t * parser)
+{
+    LOGi("on_message_begin: ==============================");
     client_t * client = (client_t *)parser->data;
     client->request.state.keep_alive = 0;
     client->request.state.error = 0;
@@ -99,7 +126,12 @@ int on_message_begin(llhttp_t* parser) {
         LOGc("Received new HTTP request while sending response! Disconnect client!");
         return -1;
     }
+    Py_CLEAR(client->request.headers);  // wsgi_input: refcnt 2 -> 1
+    // Sets up base request dict for new incoming requests
+    // https://www.python.org/dev/peps/pep-3333/#specification-details
+    client->request.headers = PyDict_Copy(g_base_dict);
     reset_wsgi_input(client);
+    PyDict_SetItem(client->request.headers, g_cv.wsgi_input, client->request.wsgi_input); // wsgi_input: refcnt 1 -> 2
     xbuf_reset(&client->response.head);
     reset_response_body(client);
     client->response.wsgi_content_length = -1;
@@ -122,9 +154,9 @@ int on_url(llhttp_t* parser, const char* data, size_t length) {
         }
     }
     if (query) {
-        set_header(client->request.headers, "QUERY_STRING", query, query_len);
+        set_header(client, g_cv.QUERY_STRING, query, query_len, 0);
     }
-    set_header(client->request.headers, "PATH_INFO", data, path_len);
+    set_header(client, g_cv.PATH_INFO, data, path_len, 0);
     return 0;
 }
 
@@ -194,7 +226,7 @@ int on_header_value(llhttp_t* parser, const char* value, size_t length) {
     LOGi("on header value");
     client_t * client = (client_t *)parser->data;
     if (client->request.current_header[0]) {
-        set_header(client->request.headers, client->request.current_header, value, length);
+        set_header_v(client, client->request.current_header, value, length, 0);
     }
     return 0;
 }
@@ -431,6 +463,7 @@ fin:
     Py_CLEAR(start_response->status);
     Py_CLEAR(start_response->exc_info);
     Py_CLEAR(start_response);
+    Py_CLEAR(client->request.headers);
     return 0;
 }
 
@@ -544,31 +577,31 @@ void build_response(client_t * client, StartResponse* response) {
 }
 
 
-void build_wsgi_environ(llhttp_t* parser) {
-    LOGi("building wsgi environ");
+void build_wsgi_environ(llhttp_t * parser)
+{
+    LOGi("build_wsgi_environ");
     client_t * client = (client_t *)parser->data;
-    PyObject * headers = client->request.headers;
-
     const char* method = llhttp_method_name(parser->method);
-    set_header(headers, "REQUEST_METHOD", method, -1);
+    set_header(client, g_cv.REQUEST_METHOD, method, -1, 0);
     const char* protocol = parser->http_minor == 1 ? "HTTP/1.1" : "HTTP/1.0";
-    set_header(headers, "SERVER_PROTOCOL", protocol, -1);
-    set_header(headers, "REMOTE_ADDR", client->remote_addr, -1);
+    set_header(client, g_cv.SERVER_PROTOCOL, protocol, -1, 0);
+    set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
 }
 
-void init_request_dict() {
+void init_request_dict()
+{
     // only constant values!!!
-    base_dict = PyDict_New();
-    PyDict_SetItem(base_dict, g_cv.SCRIPT_NAME, g_cv.empty_string);
-    PyDict_SetItem(base_dict, g_cv.SERVER_NAME, g_cv.server_host);
-    PyDict_SetItem(base_dict, g_cv.SERVER_PORT, g_cv.server_port);
-    //PyDict_SetItem(base_dict, g_cv.wsgi_input, io_BytesIO);   // not const!!!
-    PyDict_SetItem(base_dict, g_cv.wsgi_version, g_cv.version);
-    PyDict_SetItem(base_dict, g_cv.wsgi_url_scheme, g_cv.http_scheme);
-    PyDict_SetItem(base_dict, g_cv.wsgi_errors, PySys_GetObject("stderr"));
-    PyDict_SetItem(base_dict, g_cv.wsgi_run_once, Py_False);
-    PyDict_SetItem(base_dict, g_cv.wsgi_multithread, Py_False);
-    PyDict_SetItem(base_dict, g_cv.wsgi_multiprocess, Py_True);
+    g_base_dict = PyDict_New();
+    PyDict_SetItem(g_base_dict, g_cv.SCRIPT_NAME, g_cv.empty_string);
+    PyDict_SetItem(g_base_dict, g_cv.SERVER_NAME, g_cv.server_host);
+    PyDict_SetItem(g_base_dict, g_cv.SERVER_PORT, g_cv.server_port);
+    //PyDict_SetItem(g_base_dict, g_cv.wsgi_input, io_BytesIO);   // not const!!!
+    PyDict_SetItem(g_base_dict, g_cv.wsgi_version, g_cv.version);
+    PyDict_SetItem(g_base_dict, g_cv.wsgi_url_scheme, g_cv.http_scheme);
+    PyDict_SetItem(g_base_dict, g_cv.wsgi_errors, PySys_GetObject("stderr"));
+    PyDict_SetItem(g_base_dict, g_cv.wsgi_run_once, Py_False);
+    PyDict_SetItem(g_base_dict, g_cv.wsgi_multithread, Py_False);
+    PyDict_SetItem(g_base_dict, g_cv.wsgi_multiprocess, Py_True);
 }
 
 void configure_parser_settings() {
