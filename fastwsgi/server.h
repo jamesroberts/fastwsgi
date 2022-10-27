@@ -39,6 +39,7 @@ typedef struct {
         size_t current_key_len;
         size_t current_val_len;
         PyObject* headers;     // PyDict
+        PyObject* wsgi_input_empty;  // empty io.ByteIO object for requests without body
         PyObject* wsgi_input;  // type: io.BytesIO
         int wsgi_input_size;   // total size of wsgi_input PyBytes stream
         llhttp_t parser;

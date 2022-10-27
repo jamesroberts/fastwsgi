@@ -17,6 +17,7 @@ void close_cb(uv_handle_t* handle) {
     LOGi("disconnected");
     client_t * client = (client_t *)handle;
     Py_XDECREF(client->request.headers);
+    Py_XDECREF(client->request.wsgi_input_empty);
     Py_XDECREF(client->request.wsgi_input);
     xbuf_free(&client->head);
     reset_response_body(client);

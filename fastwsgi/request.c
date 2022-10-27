@@ -85,16 +85,9 @@ void reset_head_buffer(client_t * client)
     client->response.headers_size = 0;
 }
 
+static
 int reset_wsgi_input(client_t * client)
 {
-    PyObject* wsgi_input = client->request.wsgi_input;
-    if (wsgi_input == NULL) {
-        wsgi_input = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
-        client->request.wsgi_input = wsgi_input;
-    } else {
-        PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
-        Py_DECREF(result);
-    }
     client->request.wsgi_input_size = 0;
     return 0;
 }
@@ -140,7 +133,6 @@ int on_message_begin(llhttp_t * parser)
     // https://www.python.org/dev/peps/pep-3333/#specification-details
     client->request.headers = PyDict_Copy(g_base_dict);
     reset_wsgi_input(client);
-    PyDict_SetItem(client->request.headers, g_cv.wsgi_input, client->request.wsgi_input); // wsgi_input: refcnt 1 -> 2
     reset_head_buffer(client);
     reset_response_body(client);
     client->response.wsgi_content_length = -1;
@@ -284,9 +276,19 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
     if (length == 0)
         return 0;
 
+    PyObject* wsgi_input = client->request.wsgi_input;
+    if (wsgi_input == NULL) {
+        wsgi_input = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
+        client->request.wsgi_input = wsgi_input;  // object cached
+        client->request.wsgi_input_size = 0;
+    }
+    else if (client->request.wsgi_input_size == 0) {
+        PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
+        Py_DECREF(result);
+    }
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
     LOGREPR(LL_TRACE, body_content);
-    PyObject* result = PyObject_CallMethodObjArgs(client->request.wsgi_input, g_cv.write, body_content, NULL);
+    PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.write, body_content, NULL);
     if (!PyLong_CheckExact(result)) {
         client->request.state.error = 1;
         LOGf("Cannot write PyBytes to wsgi_input stream! (ret = None)");
@@ -459,13 +461,25 @@ int on_message_complete(llhttp_t * parser)
     if (client->request.state.error)
         goto fin;
 
-    // Truncate input byte stream to real request content length
-    result = PyObject_CallMethodObjArgs(client->request.wsgi_input, g_cv.truncate, NULL);
-    Py_DECREF(result);
-
-    // Sets the input byte stream position back to 0
-    result = PyObject_CallMethodObjArgs(client->request.wsgi_input, g_cv.seek, g_cv.i0, NULL);
-    Py_DECREF(result);
+    PyObject * wsgi_input = NULL;
+    if (client->request.wsgi_input_size > 0) {
+        wsgi_input = client->request.wsgi_input;
+        // Truncate input byte stream to real request content length
+        result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.truncate, NULL);
+        Py_DECREF(result);
+        // Sets the input byte stream position back to 0
+        result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
+        Py_DECREF(result);
+    } else {
+        client->request.wsgi_input_size = 0;
+        if (client->request.wsgi_input_empty == NULL) {
+            wsgi_input = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
+            client->request.wsgi_input = wsgi_input;  // object cached
+        } else { 
+            wsgi_input = client->request.wsgi_input_empty;
+        }
+    }
+    PyDict_SetItem(client->request.headers, g_cv.wsgi_input, wsgi_input); // wsgi_input: refcnt 1 -> 2
 
     build_wsgi_environ(parser);
 
