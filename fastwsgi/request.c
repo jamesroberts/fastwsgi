@@ -132,6 +132,7 @@ int on_message_begin(llhttp_t * parser)
     // Sets up base request dict for new incoming requests
     // https://www.python.org/dev/peps/pep-3333/#specification-details
     client->request.headers = PyDict_Copy(g_base_dict);
+    client->request.http_content_length = -1; // not specified
     reset_wsgi_input(client);
     reset_head_buffer(client);
     reset_response_body(client);
@@ -252,8 +253,11 @@ int on_header_value_complete(llhttp_t * parser)
         reset_head_buffer(client);
         return -1;  // critical error
     }
-    if ((key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0) ||
-        (key_len == 17 && strncmp(key, "HTTP_CONTENT_TYPE", 17) == 0)) {
+    if (key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0) {
+        client->request.http_content_length = 0; // field "Content-Length" present
+        key += 5;  // exclude prefix "HTTP_"
+    }
+    if (key_len == 17 && strncmp(key, "HTTP_CONTENT_TYPE", 17) == 0) {
         key += 5;  // exclude prefix "HTTP_"
     }
     set_header_v(client, key, val, val_len, 0);
@@ -264,8 +268,17 @@ int on_header_value_complete(llhttp_t * parser)
 int on_headers_complete(llhttp_t * parser)
 {
     client_t * client = (client_t *)parser->data;
+    uint64_t clen = parser->content_length;
     LOGi("%s", __func__);
     reset_head_buffer(client);
+    if (clen > g_srv.max_content_length) {
+        LOGc("Received HTTP headers with \"Content-Length\" = %llu (expected <= %llu)", clen, g_srv.max_content_length);
+        client->request.state.error = 1;
+        return -1;  // error
+    }
+    if (client->request.http_content_length >= 0) {
+        client->request.http_content_length = (int)clen;
+    }
     return 0;
 }
 
@@ -286,8 +299,16 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
         PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
         Py_DECREF(result);
     }
+    uint64_t clen = (uint64_t)client->request.wsgi_input_size + (uint64_t)length;
+    if (clen > g_srv.max_content_length) {
+        client->request.state.error = 1;
+        LOGc("Received too large body of HTTP request: size = %llu (expected <= %llu)", clen, g_srv.max_content_length);
+        return -1;  // critical error
+    }
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
-    LOGREPR(LL_TRACE, body_content);
+    if (client->request.wsgi_input_size == 0) {
+        LOGREPR(LL_TRACE, body_content);  // output only first chunk
+    }
     PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.write, body_content, NULL);
     if (!PyLong_CheckExact(result)) {
         client->request.state.error = 1;

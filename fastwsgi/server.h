@@ -9,6 +9,7 @@
 #define max_read_file_buffer_size (25*1000*1000)  // FIXME: change to 128KB
 #define max_preloaded_body_chunks 48
 
+static const int def_max_content_length = 999999999;
 
 typedef struct {
     uv_write_t req;  // Placement strictly at the beginning of the structure!
@@ -24,6 +25,7 @@ typedef struct {
     char* host;
     int port;
     int backlog;
+    uint64_t max_content_length;
 } server_t;
 
 typedef struct {
@@ -36,6 +38,7 @@ typedef struct {
     server_t * srv;
     char remote_addr[48];
     struct {
+        int http_content_length; // -1 = "Content-Length" not specified
         size_t current_key_len;
         size_t current_val_len;
         PyObject* headers;     // PyDict
@@ -48,7 +51,7 @@ typedef struct {
     xbuf_t head;  // dynamic buffer for request and response headers data
     struct {
         int headers_size;        // size of headers for sending
-        int wsgi_content_length; // -1 = "Content-Length" not present
+        int wsgi_content_length; // -1 = "Content-Length" not specified
         PyObject* wsgi_body;
         PyObject* body_iterator;
         int body_chunk_num;

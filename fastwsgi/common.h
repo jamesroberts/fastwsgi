@@ -33,4 +33,28 @@ typedef union {
 #endif
 #include "logx.h"
 
+
+static
+int64_t get_env_int(const char * name)
+{
+    int64_t v;
+    char buf[128];
+    size_t len = sizeof(buf) - 1;
+    int rv = uv_os_getenv(name, buf, &len);
+    if (rv == UV_ENOENT)
+        return -1;  // env not found
+    if (rv != 0 || len == 0)
+        return -2;
+    if (len == 1 && buf[0] == '0')
+        return 0;
+    if (len > 2 && buf[0] == '0' && buf[1] == 'x') {
+        v = strtoll(buf + 2, NULL, 16);
+    } else {
+        v = strtoll(buf, NULL, 10);
+    }
+    if (v <= 0 || v == LLONG_MAX)
+        return -3;
+    return v;
+}
+
 #endif

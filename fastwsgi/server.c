@@ -256,11 +256,19 @@ int main() {
     return 0;
 }
 
-PyObject* run_server(PyObject* self, PyObject* args) {
+PyObject * run_server(PyObject * self, PyObject * args)
+{
+    int64_t rv;
     memset(&g_srv, 0, sizeof(g_srv));
     int log_level = 0;
     PyArg_ParseTuple(args, "Osiii", &g_srv.wsgi_app, &g_srv.host, &g_srv.port, &g_srv.backlog, &log_level);
     set_log_level(log_level);
+
+    rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");
+    g_srv.max_content_length = (rv >= 0) ? rv : def_max_content_length;
+    if (g_srv.max_content_length >= INT_MAX)
+        g_srv.max_content_length = INT_MAX - 1;
+
     main();
     Py_RETURN_NONE;
 }
