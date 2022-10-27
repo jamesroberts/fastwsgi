@@ -621,6 +621,13 @@ int build_response_ex(void * _client, int flags, int status, const void * header
         xbuf_add_str(head, "Connection: close\r\n");
     }
 
+    if (client->request.parser.method == HTTP_HEAD) {
+        // The HEAD response does not contain a body! But may contain "Content-Length"
+        reset_response_body(client);
+        body_size = client->response.wsgi_content_length;
+        goto end;
+    }
+
     if (body_size == 0) {
         reset_response_body(client);
     }
@@ -634,10 +641,12 @@ int build_response_ex(void * _client, int flags, int status, const void * header
     }
     body_size = client->response.body_total_size;  // FIXME: add support "Transfer-Encoding: chunked"
 
+end:
     if (body_size == 0) {
         xbuf_add_str(head, "Content-Length: 0\r\n");
         LOGi("Added Header 'Content-Length: 0'");
-    } else {
+    }
+    else if (body_size > 0) {
         char * buf = xbuf_expand(head, 48);
         head->size += sprintf(buf, "Content-Length: %d\r\n", (int)body_size);
         LOGi("Added Header 'Content-Length: %d'", (int)body_size);
