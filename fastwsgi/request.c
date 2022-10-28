@@ -88,6 +88,10 @@ void reset_head_buffer(client_t * client)
 static
 int reset_wsgi_input(client_t * client)
 {
+    if (client->request.wsgi_input_size > 1*1024*1024) {
+        // Always free huge buffers for incoming data
+        Py_CLEAR(client->request.wsgi_input);
+    }
     client->request.wsgi_input_size = 0;
     return 0;
 }
@@ -133,6 +137,7 @@ int on_message_begin(llhttp_t * parser)
     // https://www.python.org/dev/peps/pep-3333/#specification-details
     client->request.headers = PyDict_Copy(g_base_dict);
     client->request.http_content_length = -1; // not specified
+    client->request.chunked = 0;
     reset_wsgi_input(client);
     reset_head_buffer(client);
     reset_response_body(client);
@@ -260,7 +265,23 @@ int on_header_value_complete(llhttp_t * parser)
     if (key_len == 17 && strncmp(key, "HTTP_CONTENT_TYPE", 17) == 0) {
         key += 5;  // exclude prefix "HTTP_"
     }
-    set_header_v(client, key, val, val_len, 0);
+    if (key_len == 22 && strncmp(key, "HTTP_TRANSFER_ENCODING", 22) == 0) {
+        if (val_len == 7 && strncmp(val, "chunked", 7) == 0) {
+            client->request.chunked = 1;
+        } else {
+            client->request.state.error = 1;
+            LOGc("%s: Header \"Transfer-Encoding\" contain unsupported value = '%s'", __func__, val);
+            // https://peps.python.org/pep-3333/#other-http-features
+            LOGc("%s: FastWSGI cannot decompress content!", __func__);
+            return -1;  // critical error
+        }
+        key = NULL;  // skip chunked flag
+        // Let's skip the chunks flag, since the FastWSGI server completely downloads the body into memory
+        // and immediately gives body to the WSGI application.
+    }
+    if (key)
+        set_header_v(client, key, val, val_len, 0);
+
     reset_head_buffer(client);
     return 0;
 }
@@ -269,7 +290,7 @@ int on_headers_complete(llhttp_t * parser)
 {
     client_t * client = (client_t *)parser->data;
     uint64_t clen = parser->content_length;
-    LOGi("%s", __func__);
+    LOGi("%s: %s", __func__, (client->request.chunked) ? "(chunked)" : "");
     reset_head_buffer(client);
     if (clen > g_srv.max_content_length) {
         LOGc("Received HTTP headers with \"Content-Length\" = %llu (expected <= %llu)", clen, g_srv.max_content_length);
@@ -481,6 +502,16 @@ int on_message_complete(llhttp_t * parser)
 
     if (client->request.state.error)
         goto fin;
+
+    if (client->request.http_content_length >= 0) {
+        const int clen = client->request.http_content_length;
+        const int ilen = client->request.wsgi_input_size;
+        if (ilen != clen) {
+            client->request.state.error = 1;
+            LOGc("Received body with size %d not equal specified 'Content-Length' = %d", ilen, clen);
+            goto fin;
+        }
+    }
 
     PyObject * wsgi_input = NULL;
     if (client->request.wsgi_input_size > 0) {
@@ -698,6 +729,7 @@ void build_response(client_t * client, StartResponse* response) {
 void build_wsgi_environ(llhttp_t * parser)
 {
     LOGi("build_wsgi_environ");
+    char buf[128];
     client_t * client = (client_t *)parser->data;
     const char* method = llhttp_method_name(parser->method);
     set_header(client, g_cv.REQUEST_METHOD, method, -1, 0);
@@ -705,6 +737,13 @@ void build_wsgi_environ(llhttp_t * parser)
     set_header(client, g_cv.SERVER_PROTOCOL, protocol, -1, 0);
     if (client->remote_addr[0])
         set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
+
+    if (client->request.chunked && client->request.http_content_length < 0) {
+        sprintf(buf, "%d", client->request.wsgi_input_size);
+        set_header(client, g_cv.CONTENT_LENGTH, buf, -1, 0);
+        // Insertion of this header is allowed because the header "Transfer-Encoding" FastWSGI server removes!
+        // https://peps.python.org/pep-3333/#other-http-features
+    }
 }
 
 void init_request_dict()

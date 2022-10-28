@@ -123,13 +123,16 @@ void read_cb(uv_stream_t* handle, ssize_t nread, const uv_buf_t* buf) {
         LOGt(buf->base);
         enum llhttp_errno err = llhttp_execute(parser, buf->base, nread);
         if (err == HPE_OK) {
-            LOGi("Successfully parsed (response len = %d+%d)", client->head.size, client->response.body_preloaded_size);
-            if (client->request.state.error)
+            LOGt("chunk parsed (wsgi_input_size = %d)", client->request.wsgi_input_size);
+            if (client->request.state.error) {
                 send_error(client, HTTP_STATUS_INTERNAL_SERVER_ERROR, NULL);
-            else if (client->response.headers_size > 0)
+            }
+            else if (client->response.headers_size > 0) {
+                LOGi("Successfully parsed (response len = %d+%d)", client->head.size, client->response.body_preloaded_size);
                 send_response(client);
+            }
             else
-                continue_read = 1;  // response not sended to client!
+                continue_read = 1;
         }
         else {
             LOGe("Parse error: %s %s\n", llhttp_errno_name(err), client->request.parser.reason);

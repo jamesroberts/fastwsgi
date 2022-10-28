@@ -39,6 +39,7 @@ typedef struct {
     char remote_addr[48];
     struct {
         int http_content_length; // -1 = "Content-Length" not specified
+        int chunked;             // Transfer-Encoding: chunked
         size_t current_key_len;
         size_t current_val_len;
         PyObject* headers;     // PyDict
