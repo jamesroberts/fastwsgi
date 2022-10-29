@@ -12,6 +12,21 @@
 
 server_t g_srv;
 
+void free_read_buffer(client_t * client, void * data)
+{
+    for (size_t i = 0; i < ARRAY_SIZE(client->rbuf); i++) {
+        xbuf_t * r_buf = &client->rbuf[i];
+        if (data && r_buf->data == data) {
+            //LOGi("%s: free buffer = %p", __func__, data);
+            r_buf->size = 0;  // free buffer
+            return;
+        }
+        if (!data) {
+            xbuf_free(r_buf);
+        }
+    }
+}
+
 typedef enum {
     CA_OK           = 0,  // continue read from socket
     CA_CLOSE        = 1,
@@ -28,6 +43,7 @@ void close_cb(uv_handle_t * handle)
     xbuf_free(&client->head);
     free_start_response(client);
     reset_response_body(client);
+    free_read_buffer(client, NULL);
     free(client);
 }
 
@@ -185,7 +201,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
 
 fin:
     if (buf->base)
-        free(buf->base);
+        free_read_buffer(client, buf->base);
 
     if (PyErr_Occurred()) {
         if (err == 0)
@@ -210,12 +226,44 @@ fin:
     }
 }
 
+#define def_read_buffer_size (64*1024)
+
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 {
-    LOGd("Allocating buffer (size = %d)", (int)suggested_size);
-    buf->base = (char*)malloc(suggested_size + 1);
-    buf->len = suggested_size;
-    buf->base[suggested_size] = 0;
+    LOGt("%s: size = %d", __func__, (int)suggested_size);
+    client_t * client = (client_t *)handle;
+    buf->base = NULL;
+    buf->len = 0;
+
+    xbuf_t * rb = NULL;
+    for (size_t i = 0; i < ARRAY_SIZE(client->rbuf); i++) {
+        xbuf_t * r_buf = &client->rbuf[i];
+        if (r_buf->size > 0)
+            continue;  // buffer used!
+
+        if (r_buf->capacity > def_read_buffer_size) {
+            // vacant preallocated buffer
+            r_buf->size = def_read_buffer_size;  // set used flag
+            buf->len = def_read_buffer_size;
+            buf->base = r_buf->data;
+            buf->base[0] = 0;
+            //LOGi("%s: get preallocated buf %p", __func__, buf->base);
+            return;
+        }
+        if (!rb && r_buf->capacity == 0)
+            rb = r_buf;
+    }
+    if (!rb)  // all read buffers used!
+        return;  // error
+
+    int err = xbuf_init(rb, NULL, def_read_buffer_size + 1);
+    if (err)
+        return;  // error
+
+    buf->len = def_read_buffer_size;
+    buf->base = rb->data;
+    buf->base[0] = 0;
+    LOGd("%s: alloc new buffer %p (size = %d)", __func__, buf->base, (int)buf->len);
 }
 
 void connection_cb(uv_stream_t * server, int status)

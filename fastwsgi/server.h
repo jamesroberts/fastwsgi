@@ -43,6 +43,7 @@ typedef struct {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * srv;
     char remote_addr[48];
+    xbuf_t rbuf[2];      // buffers for reading from socket
     struct {
         int load_state;
         int http_content_length; // -1 = "Content-Length" not specified
