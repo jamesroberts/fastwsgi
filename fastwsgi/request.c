@@ -3,6 +3,7 @@
 #include "llhttp.h"
 #include "constants.h"
 #include "start_response.h"
+#include "pyhacks.h"
 
 PyObject* g_base_dict = NULL;
 
@@ -338,6 +339,17 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
         LOGc("Received too large body of HTTP request: size = %llu (expected <= %llu)", clen, g_srv.max_content_length);
         return -1;  // critical error
     }
+    
+    bytesio_t * bio = get_bytesio_object(wsgi_input);
+    if (bio) {
+        Py_ssize_t rv = io_BytesIO_write_bytes(bio, body, length);
+        if (rv < 0 || rv != (Py_ssize_t)length) {
+            client->error = 1;
+            LOGf("Failed write bytes directly to wsgi_input Stream! (ret = %d, expected = %d)", (int)rv, (int)length);
+        }
+        goto fin;
+    }
+
     PyObject* body_content = PyBytes_FromStringAndSize(body, length);
     if (client->request.wsgi_input_size == 0) {
         LOGREPR(LL_TRACE, body_content);  // output only first chunk
@@ -355,6 +367,8 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
     }
     Py_XDECREF(result);
     Py_XDECREF(body_content);
+
+fin:
     client->request.wsgi_input_size += (int)length;
     return (client->error) ? -1 : 0;
 }
