@@ -48,11 +48,11 @@ void FileWrapper_Clear(PyObject* self) {
 }
 
 PyTypeObject FileWrapper_Type = {
-  PyVarObject_HEAD_INIT(NULL, 0)
-  "FileWrapper",
-  sizeof(FileWrapper),
-  0,
-  (destructor)FileWrapper_Clear,
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "FileWrapper",
+    sizeof(FileWrapper),
+    0,
+    (destructor)FileWrapper_Clear,
 };
 
 static PyMethodDef Methods[] = {

@@ -10,7 +10,7 @@ NUM_WORKERS = 4
 HOST = "0.0.0.0"
 PORT = 5000
 BACKLOG = 1024
-LOGLEVEL = 0
+LOGLEVEL = 3
 
 
 def run_multi_process_server(app):

@@ -16,13 +16,16 @@ typedef enum {
     RF_HEADERS_PYLIST  = 0x02
 } response_flag_t;
 
-int build_response_ex(void * client, int flags, int status, const void * headers, const char * body, int body_size);
-void build_response(PyObject* wsgi_response, StartResponse* response, llhttp_t* parser);
+int build_response_ex(void * client, int flags, int status, const void * headers, const void * body, int body_size);
 
 llhttp_settings_t parser_settings;
 void configure_parser_settings();
 
 void logrepr(int level, PyObject* obj);
 #define LOGREPR(_level_, _msg_) if (g_log_level >= _level_) logrepr(_level_, _msg_)
+
+void reset_response_body(void * client);
+void close_iterator(PyObject* iterator);
+PyObject* wsgi_iterator_get_next_chunk(void * client);
 
 #endif
