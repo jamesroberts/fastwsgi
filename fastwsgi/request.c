@@ -147,6 +147,7 @@ int on_message_begin(llhttp_t * parser)
     client->request.headers = PyDict_Copy(g_base_dict);
     client->request.http_content_length = -1; // not specified
     client->request.chunked = 0;
+    client->request.expect_continue = 0;
     reset_wsgi_input(client);
     reset_head_buffer(client);
     free_start_response(client);
@@ -290,6 +291,16 @@ int on_header_value_complete(llhttp_t * parser)
         // Let's skip the chunks flag, since the FastWSGI server completely downloads the body into memory
         // and immediately gives body to the WSGI application.
     }
+    if (key_len == 11 && strncmp(key, "HTTP_EXPECT", 11) == 0) {
+        if (val_len != 12 || strncmp(val, "100-continue", 12) != 0) {
+            client->error = 1;
+            LOGc("%s: Header \"Expect\" contain unsupported value = '%s'", __func__, val);
+            // https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Expect
+            return -1;  // critical error
+        }
+        client->request.expect_continue = 1;
+        key = NULL;  // hide Expect header
+    }
     if (key)
         set_header_v(client, key, val, val_len, 0);
 
@@ -306,11 +317,19 @@ int on_headers_complete(llhttp_t * parser)
     reset_head_buffer(client);
     if (clen > g_srv.max_content_length) {
         LOGc("Received HTTP headers with \"Content-Length\" = %llu (expected <= %llu)", clen, g_srv.max_content_length);
+        if (client->request.expect_continue) {
+            client->error = HTTP_STATUS_EXPECTATION_FAILED;
+            return 1; // Assume that request has no body, and proceed to parsing the next message!
+        }
         client->error = 1;
         return -1;  // error
     }
     if (client->request.http_content_length >= 0) {
         client->request.http_content_length = (int)clen;
+    }
+    if (client->request.expect_continue) {
+        x_send_status(client, HTTP_STATUS_CONTINUE);
+        client->request.expect_continue = 0;
     }
     return 0;
 }
@@ -385,8 +404,11 @@ int on_message_complete(llhttp_t * parser)
     } else {
         client->request.keep_alive = 0;
     }
-    if (client->error)
+    if (client->error) {
+        if (client->request.expect_continue && client->error == HTTP_STATUS_EXPECTATION_FAILED)
+            return 0;
         return -1;
+    }
 
     if (client->request.http_content_length >= 0) {
         const int clen = client->request.http_content_length;

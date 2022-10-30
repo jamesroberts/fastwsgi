@@ -65,6 +65,35 @@ void shutdown_connection(client_t * client)
     uv_shutdown(shutdown, (uv_stream_t *)client, shutdown_cb);
 }
 
+typedef struct {
+    uv_write_t req;
+    uv_buf_t buf;
+    void * client;
+    char data[1];
+} x_write_req_t;
+
+void x_write_cb(uv_write_t * req, int status)
+{
+    free(req);
+}
+
+int x_send_status(client_t * client, int status)
+{
+    size_t buf_size = sizeof(x_write_req_t) + 640;
+    x_write_req_t * wreq = (x_write_req_t *)malloc(buf_size);
+    wreq->client = client;
+    char * buf = wreq->data;
+    int len = 0;
+    len += sprintf(buf + len, "HTTP/1.1 %d\r\n", status);
+    //len += sprintf(buf + len, "Content-Length: 0\r\n");
+    len += sprintf(buf + len, "\r\n");
+    wreq->buf.len = len;
+    wreq->buf.base = buf;
+    LOGi("%s: \"%s\"", __func__, buf);
+    uv_write((uv_write_t*)wreq, (uv_stream_t*)client, &wreq->buf, 1, x_write_cb);
+    return 0;
+}
+
 void write_cb(uv_write_t * req, int status)
 {
     LOGe_IF(status, "Write error %s\n", uv_strerror(status));
@@ -178,6 +207,11 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     }
     if (client->request.load_state != LS_OK) {
         // error from callback function "on_message_complete"
+        if (client->request.expect_continue && client->error == HTTP_STATUS_EXPECTATION_FAILED) {
+            client->request.expect_continue = 0;
+            err = HTTP_STATUS_EXPECTATION_FAILED;
+            goto fin;
+        }
         err = HTTP_STATUS_BAD_REQUEST;
         goto fin;
     }

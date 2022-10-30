@@ -49,6 +49,7 @@ typedef struct {
         int http_content_length; // -1 = "Content-Length" not specified
         int chunked;             // Transfer-Encoding: chunked
         int keep_alive;          // 1 = Connection: Keep-Alive or HTTP/1.1
+        int expect_continue;     // 1 = Expect: 100-continue
         size_t current_key_len;
         size_t current_val_len;
         PyObject* headers;     // PyDict
@@ -79,6 +80,8 @@ PyObject* run_server(PyObject* self, PyObject* args);
 
 void free_start_response(client_t * client);
 void reset_response_body(client_t * client);
+
+int x_send_status(client_t * client, int status);
 
 int call_wsgi_app(client_t * client);
 int process_wsgi_response(client_t * client);
