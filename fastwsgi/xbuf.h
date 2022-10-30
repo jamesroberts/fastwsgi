@@ -10,7 +10,7 @@ typedef struct {
 } xbuf_t;
 
 
-INLINE
+static
 char * xbuf_expand(xbuf_t * buf, size_t expand_size)
 {
     int need_size = buf->size + (int)expand_size + 8;
@@ -38,7 +38,7 @@ char * xbuf_expand(xbuf_t * buf, size_t expand_size)
     return buf->data + buf->size;
 }
 
-INLINE
+static
 int xbuf_init(xbuf_t * buf, const void * data, size_t size)
 {
     buf->data = NULL;
@@ -57,13 +57,13 @@ int xbuf_init(xbuf_t * buf, const void * data, size_t size)
     return 0;
 }
 
-INLINE
+static
 int xbuf_init_str(xbuf_t * buf, const char * str)
 {
     return xbuf_init(buf, str, strlen(str));
 }
 
-INLINE
+static
 int xbuf_add(xbuf_t * buf, const void * data, size_t size)
 {
     char * ptr = xbuf_expand(buf, size);
@@ -77,13 +77,13 @@ int xbuf_add(xbuf_t * buf, const void * data, size_t size)
     return buf->size;
 }
 
-INLINE
+static
 int xbuf_add_str(xbuf_t * buf, const char * str)
 {
     return xbuf_add(buf, str, strlen(str));
 }
 
-INLINE
+static
 void xbuf_reset(xbuf_t * buf)
 {
     buf->size = 0;
@@ -91,9 +91,7 @@ void xbuf_reset(xbuf_t * buf)
         buf->data[0] = 0;
 }
 
-#define XBUF_RESET(_buf_) xbuf_reset(&(_buf_))
-
-INLINE
+static
 void xbuf_free(xbuf_t * buf)
 {
     if (buf->data)
