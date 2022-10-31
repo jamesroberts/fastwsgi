@@ -13,6 +13,7 @@ typedef struct {
     PyObject* PATH_INFO;
     PyObject* HTTP_;
     PyObject* REMOTE_ADDR;
+    PyObject* CONTENT_LENGTH;
 
     PyObject* wsgi_version;
     PyObject* wsgi_url_scheme;
