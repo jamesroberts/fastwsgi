@@ -215,7 +215,13 @@ int on_header_field_complete(llhttp_t * parser)
     ssize_t size = buf->size;
     for (ssize_t i = 0; i < size; i++) {
         const char symbol = data[i];
-        if (symbol == '_' || (unsigned char)symbol > 127) {
+        if (symbol == '_') {  // CVE-2015-0219 
+            xbuf_reset(buf);
+            client->request.current_key_len = 0;
+            client->request.current_val_len = 0;
+            return 0;  // skip incorrect header
+        }
+        if ((unsigned char)symbol >= 127) {
             continue;
         }
         if (symbol == '-') {
@@ -240,9 +246,7 @@ int on_header_value(llhttp_t * parser, const char * data, size_t length)
     xbuf_t * buf = &client->head;
     if (client->request.current_val_len == 0) {
         if (client->request.current_key_len == 0) {
-            client->error = 1;
-            LOGc("%s: Headers has an unnamed value!", __func__);
-            return -1;  // critical error
+            return 0;  // skip incorrect header
         }
         if (client->request.current_key_len + 1 != (size_t)buf->size) {
             client->error = 1;
@@ -265,10 +269,8 @@ int on_header_value_complete(llhttp_t * parser)
     char * val = buf->data + key_len + 1;
     LOGi("%s: '%s'", __func__, val);
     if (key_len == 0) {
-        client->error = 1;
-        LOGc("%s: Headers has an unnamed value!", __func__);
-        reset_head_buffer(client);
-        return -1;  // critical error
+        LOGw("%s: Headers has an unnamed value!", __func__);        
+        return 0;  // skip incorrect header
     }
     if (key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0) {
         client->request.http_content_length = 0; // field "Content-Length" present
