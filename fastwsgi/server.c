@@ -116,7 +116,7 @@ int stream_write(client_t * client)
     wreq->bufs[0].len = client->head.size;
     total_len += wreq->bufs[0].len;
     if (client->response.body_preloaded_size > 0) {
-        for (int i = 0; i < client->response.body_chunk_num; i++) {
+        for (size_t i = 0; i < client->response.body_chunk_num; i++) {
             Py_ssize_t size = PyBytes_GET_SIZE(client->response.body[i]);
             char * data = PyBytes_AS_STRING(client->response.body[i]);
             wreq->bufs[i+1].base = data;
@@ -201,7 +201,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
             err = HTTP_STATUS_BAD_REQUEST;
             goto fin;
         }
-        LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %d", client->request.load_state, client->request.wsgi_input_size);
+        LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %lld", client->request.load_state, client->request.wsgi_input_size);
         // continue read from socket
         goto fin;
     }
@@ -215,7 +215,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
         err = HTTP_STATUS_BAD_REQUEST;
         goto fin;
     }
-    LOGd("HTTP request successfully parsed (wsgi_input_size = %d)", client->request.wsgi_input_size);
+    LOGd("HTTP request successfully parsed (wsgi_input_size = %lld)", client->request.wsgi_input_size);
     err = call_wsgi_app(client);
     if (err) {
         goto fin;
@@ -228,7 +228,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     if (err) {
         goto fin;
     }
-    LOGi("Response created! (len = %d+%d)", client->head.size, client->response.body_preloaded_size);
+    LOGi("Response created! (len = %d+%lld)", client->head.size, client->response.body_preloaded_size);
     act = stream_write(client);
     if (!client->request.keep_alive)
         act = CA_SHUTDOWN;

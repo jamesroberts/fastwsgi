@@ -103,11 +103,11 @@ void free_start_response(client_t * client)
 
 void reset_response_body(client_t * client)
 {
-    int chunks = client->response.body_chunk_num;
+    size_t chunks = client->response.body_chunk_num;
     if (chunks || client->response.wsgi_body) {
-        LOGd("reset_response_body: chunks = %d, wsgi_body = %p", chunks, client->response.wsgi_body);
+        LOGd("reset_response_body: chunks = %d, wsgi_body = %p", (int)chunks, client->response.wsgi_body);
     }
-    for (int i = 0; i < chunks; i++) {
+    for (size_t i = 0; i < chunks; i++) {
         Py_XDECREF(client->response.body[i]);
     }
     client->response.body_chunk_num = 0;
@@ -327,7 +327,7 @@ int on_headers_complete(llhttp_t * parser)
         return -1;  // error
     }
     if (client->request.http_content_length >= 0) {
-        client->request.http_content_length = (int)clen;
+        client->request.http_content_length = clen;
     }
     if (client->request.expect_continue) {
         x_send_status(client, HTTP_STATUS_CONTINUE);
@@ -354,7 +354,7 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
         PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
         Py_DECREF(result);
     }
-    uint64_t clen = (uint64_t)client->request.wsgi_input_size + (uint64_t)length;
+    uint64_t clen = (uint64_t)client->request.wsgi_input_size + length;
     if (clen > g_srv.max_content_length) {
         client->error = 1;
         LOGc("Received too large body of HTTP request: size = %llu (expected <= %llu)", clen, g_srv.max_content_length);
@@ -390,7 +390,7 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
     Py_XDECREF(body_content);
 
 fin:
-    client->request.wsgi_input_size += (int)length;
+    client->request.wsgi_input_size += length;
     return (client->error) ? -1 : 0;
 }
 
@@ -413,11 +413,11 @@ int on_message_complete(llhttp_t * parser)
     }
 
     if (client->request.http_content_length >= 0) {
-        const int clen = client->request.http_content_length;
-        const int ilen = client->request.wsgi_input_size;
+        const int64_t clen = client->request.http_content_length;
+        const int64_t ilen = client->request.wsgi_input_size;
         if (ilen != clen) {
             client->error = 1;
-            LOGc("Received body with size %d not equal specified 'Content-Length' = %d", ilen, clen);
+            LOGc("Received body with size %lld not equal specified 'Content-Length' = %lld", ilen, clen);
             return -1;
         }
     }
@@ -456,7 +456,7 @@ int on_message_complete(llhttp_t * parser)
         set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
 
     if (client->request.chunked && client->request.http_content_length < 0) {
-        sprintf(buf, "%d", client->request.wsgi_input_size);
+        sprintf(buf, "%lld", client->request.wsgi_input_size);
         set_header(client, g_cv.CONTENT_LENGTH, buf, -1, 0);
         // Insertion of this header is allowed because the header "Transfer-Encoding" FastWSGI server removes!
         // https://peps.python.org/pep-3333/#other-http-features
@@ -490,7 +490,7 @@ int call_wsgi_app(client_t * client)
 // =================== build response ============================================
 
 int get_info_from_wsgi_response(client_t * client);
-int wsgi_body_pleload(client_t * client, PyObject * wsgi_body);
+int64_t wsgi_body_pleload(client_t * client, PyObject * wsgi_body);
 
 int process_wsgi_response(client_t * client)
 {
@@ -526,9 +526,9 @@ int process_wsgi_response(client_t * client)
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
     }
-    int len = wsgi_body_pleload(client, wsgi_body);
+    int64_t len = wsgi_body_pleload(client, wsgi_body);
     if (len < 0) {
-        LOGc("wsgi_body_pleload return error = %d", err);
+        LOGc("wsgi_body_pleload return error = %d", (int)len);
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
     }
@@ -566,12 +566,13 @@ int create_response(client_t * client)
     return err;
 }
 
-int build_response(client_t * client, int flags, int status, const void * headers, const void * body_data, int body_size)
+int build_response(client_t * client, int flags, int status, const void * headers, const void * body_data, int _body_size)
 {
     xbuf_t * head = &client->head;
     reset_head_buffer(client);
     PyObject** body = client->response.body;
     StartResponse * response = NULL;
+    int64_t body_size = _body_size;
 
     if (flags & RF_HEADERS_PYLIST) {
         response = (StartResponse *)headers;
@@ -644,7 +645,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     }
     if (body_data && body_size > 0) {
         reset_response_body(client);
-        PyObject * buf = PyBytes_FromStringAndSize((const char *)body_data, body_size);
+        PyObject * buf = PyBytes_FromStringAndSize((const char *)body_data, (Py_ssize_t)body_size);
         body[0] = buf;
         client->response.body_chunk_num = 1;
         client->response.body_preloaded_size = body_size;
@@ -659,8 +660,8 @@ end:
     }
     else if (body_size > 0) {
         char * buf = xbuf_expand(head, 48);
-        head->size += sprintf(buf, "Content-Length: %d\r\n", (int)body_size);
-        LOGi("Added Header 'Content-Length: %d'", (int)body_size);
+        head->size += sprintf(buf, "Content-Length: %lld\r\n", body_size);
+        LOGi("Added Header 'Content-Length: %lld'", body_size);
     }
     xbuf_add(head, "\r\n", 2);  // end of headers
 
@@ -686,12 +687,15 @@ int get_info_from_wsgi_response(client_t * client)
         if (key_len == 14 && key[7] == '-' && strcasecmp(key, "Content-Length") == 0) {
             if (value_len == 0)
                 return -2;  // error
-            if (value_len == 1 && value[0] == '0')
-                return 0;
-            int clen = atoi(value);
-            if (clen == 0 || clen == INT_MAX)
-                return -3;  // error
-            LOGi("wsgi response: content-length = %d", clen);
+            int64_t clen;
+            if (value_len == 1 && value[0] == '0') {
+                clen = 0;
+            } else {
+                clen = strtoll(value, NULL, 10);
+                if (clen <= 0 || clen == LLONG_MAX)
+                    return -3;  // error
+            }
+            LOGi("wsgi response: content-length = %lld", clen);
             client->response.wsgi_content_length = clen;
         }
     }
@@ -728,18 +732,18 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr)
     return NULL;
 }
 
-int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
+int64_t wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
 {
     int err = 0;
     PyObject** body = client->response.body;
-    int wsgi_content_length = client->response.wsgi_content_length;
+    int64_t wsgi_content_length = client->response.wsgi_content_length;
 
     if (PyBytes_CheckExact(wsgi_body)) {
         body[0] = wsgi_body;
         Py_INCREF(wsgi_body);  // Reasone: wsgi_body inserted into body chunks array
         client->response.body_chunk_num = 1;
-        client->response.body_total_size = (int)PyBytes_GET_SIZE(wsgi_body);
-        client->response.body_preloaded_size = (int)PyBytes_GET_SIZE(wsgi_body);
+        client->response.body_total_size = PyBytes_GET_SIZE(wsgi_body);
+        client->response.body_preloaded_size = PyBytes_GET_SIZE(wsgi_body);
         return client->response.body_preloaded_size;
     }
     PyObject* iterator = client->response.body_iterator;
@@ -775,11 +779,11 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
         }
     }
     PyObject* item = NULL;
-    int chunks = 0;
+    size_t chunks = 0;
     while (item = wsgi_iterator_get_next_chunk(client, 1)) {
         body[chunks++] = item;
         client->response.body_chunk_num = chunks;
-        client->response.body_preloaded_size += (int)PyBytes_GET_SIZE(item);
+        client->response.body_preloaded_size += PyBytes_GET_SIZE(item);
         if (chunks == max_preloaded_body_chunks + 1) {
             // FIXME: add support sending unlimit body chunks
             err = -12;  // overflow!
@@ -791,12 +795,12 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
         return -13;
     }
     if (err == 0) {
-        LOGi("wsgi_body: response body fully loaded! (size = %d)", client->response.body_preloaded_size);
+        LOGi("wsgi_body: response body fully loaded! (size = %lld)", client->response.body_preloaded_size);
         client->response.body_total_size = client->response.body_preloaded_size;
         return client->response.body_total_size;
     }
     if (client->response.body_preloaded_size == wsgi_content_length) {
-        LOGi("wsgi_body: response body fully loaded! (SIZE = %d)", wsgi_content_length);
+        LOGi("wsgi_body: response body fully loaded! (SIZE = %lld)", wsgi_content_length);
         client->response.body_total_size = wsgi_content_length;
         return wsgi_content_length;
     }

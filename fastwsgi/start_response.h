@@ -11,7 +11,7 @@ typedef struct {
     int called;
 } StartResponse;
 
-PyTypeObject StartResponse_Type;
+extern PyTypeObject StartResponse_Type;
 
 void set_status_error();
 void set_header_tuple_error();

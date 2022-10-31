@@ -46,7 +46,7 @@ typedef struct {
     xbuf_t rbuf[2];      // buffers for reading from socket
     struct {
         int load_state;
-        int http_content_length; // -1 = "Content-Length" not specified
+        int64_t http_content_length; // -1 = "Content-Length" not specified
         int chunked;             // Transfer-Encoding: chunked
         int keep_alive;          // 1 = Connection: Keep-Alive or HTTP/1.1
         int expect_continue;     // 1 = Expect: 100-continue
@@ -55,7 +55,7 @@ typedef struct {
         PyObject* headers;     // PyDict
         PyObject* wsgi_input_empty;  // empty io.ByteIO object for requests without body
         PyObject* wsgi_input;  // type: io.BytesIO
-        int wsgi_input_size;   // total size of wsgi_input PyBytes stream
+        int64_t wsgi_input_size;   // total size of wsgi_input PyBytes stream
         llhttp_t parser;
     } request;
     int error;    // error code on process request and response
@@ -63,13 +63,13 @@ typedef struct {
     StartResponse * start_response;
     struct {
         int headers_size;        // size of headers for sending
-        int wsgi_content_length; // -1 = "Content-Length" not specified
+        int64_t wsgi_content_length; // -1 = "Content-Length" not specified
         PyObject* wsgi_body;
         PyObject* body_iterator;
-        int body_chunk_num;
+        size_t body_chunk_num;
         PyObject* body[max_preloaded_body_chunks + 1]; // pleloaded body's chunks (PyBytes)
-        int body_preloaded_size; // sum of all preloaded body's chunks
-        int body_total_size;
+        int64_t body_preloaded_size; // sum of all preloaded body's chunks
+        int64_t body_total_size;
         write_req_t write_req;
     } response;
 } client_t;
