@@ -612,6 +612,10 @@ int build_response(client_t * client, int flags, int status, const void * header
                 if (strcasecmp(key, "Content-Length") == 0)
                     continue;  // skip "Content-Length" header
 
+            if (key_len == 10)
+                if (strcasecmp(key, "Connection") == 0)
+                    continue;  // skip "Connection" header
+
             size_t value_len = 0;
             const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
@@ -628,7 +632,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     }
 
     if (flags & RF_SET_KEEP_ALIVE) {
-        xbuf_add_str(head, "Connection: Keep-Alive\r\n");
+        xbuf_add_str(head, "Connection: keep-alive\r\n");
     } else {
         xbuf_add_str(head, "Connection: close\r\n");
     }
