@@ -1,7 +1,7 @@
 import socket
 import pytest
 
-BAD_REQUEST_RESPONSE = b"HTTP/1.1 400 Bad Request\r\n\r\n"
+BAD_REQUEST_RESPONSE = b"HTTP/1.1 400 BAD_REQUEST\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
 
 raw_requests = [
     "GET\r\n\r\n",
