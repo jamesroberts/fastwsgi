@@ -19,6 +19,9 @@
 # define INLINE inline
 #endif
 
+#define _max(a,b) (((a) > (b)) ? (a) : (b))
+#define _min(a,b) (((a) < (b)) ? (a) : (b))
+
 typedef union {
     struct sockaddr_storage storage;
     struct sockaddr addr; 

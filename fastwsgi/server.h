@@ -6,8 +6,11 @@
 #include "request.h"
 #include "xbuf.h"
 
-#define max_read_file_buffer_size (25*1000*1000)  // FIXME: change to 128KB
 #define max_preloaded_body_chunks 48
+
+static const size_t MIN_max_chunk_size = 2*1024;
+static const size_t def_max_chunk_size = 256*1024;
+static const size_t MAX_max_chunk_size = 64*1024*1024;
 
 static const int def_max_content_length = 999999999;
 
@@ -27,6 +30,7 @@ typedef struct {
     int port;
     int backlog;
     uint64_t max_content_length;
+    size_t max_chunk_size;
 } server_t;
 
 typedef enum {

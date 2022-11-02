@@ -33,10 +33,13 @@ void init_constants() {
 
     g_cv.module_io = PyImport_ImportModule("io");
     g_cv.BytesIO = PyUnicode_FromString("BytesIO");
+    g_cv.close = PyUnicode_FromString("close");
     g_cv.write = PyUnicode_FromString("write");
     g_cv.read = PyUnicode_FromString("read");
     g_cv.truncate = PyUnicode_FromString("truncate");
     g_cv.seek = PyUnicode_FromString("seek");
+    g_cv.tell = PyUnicode_FromString("tell");
+    g_cv.buffer_size = PyUnicode_FromString("buffer_size");
     g_cv.getvalue = PyUnicode_FromString("getvalue");
     g_cv.comma = PyUnicode_FromString(",");
 

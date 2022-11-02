@@ -405,6 +405,11 @@ PyObject * run_server(PyObject * self, PyObject * args)
     if (g_srv.max_content_length >= INT_MAX)
         g_srv.max_content_length = INT_MAX - 1;
 
+    rv = get_env_int("FASTWSGI_MAX_CHUNK_SIZE");
+    g_srv.max_chunk_size = (rv >= 0) ? (size_t)rv : (size_t)def_max_chunk_size;
+    g_srv.max_chunk_size = _min(g_srv.max_chunk_size, MAX_max_chunk_size);
+    g_srv.max_chunk_size = _max(g_srv.max_chunk_size, MIN_max_chunk_size);
+
     main();
     Py_RETURN_NONE;
 }

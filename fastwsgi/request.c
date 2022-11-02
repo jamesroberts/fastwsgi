@@ -123,6 +123,7 @@ void reset_response_body(client_t * client)
         }
     }
     Py_CLEAR(client->response.wsgi_body);
+    client->response.body_iterator = NULL;
 }
 
 // ============== request processing ==================================================
@@ -490,7 +491,7 @@ int call_wsgi_app(client_t * client)
 // =================== build response ============================================
 
 int get_info_from_wsgi_response(client_t * client);
-int64_t wsgi_body_pleload(client_t * client, PyObject * wsgi_body);
+int wsgi_body_pleload(client_t * client, PyObject * wsgi_body);
 
 int process_wsgi_response(client_t * client)
 {
@@ -526,9 +527,9 @@ int process_wsgi_response(client_t * client)
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
     }
-    int64_t len = wsgi_body_pleload(client, wsgi_body);
-    if (len < 0) {
-        LOGc("wsgi_body_pleload return error = %d", (int)len);
+    err = wsgi_body_pleload(client, wsgi_body);
+    if (err < 0) {
+        LOGc("wsgi_body_pleload return error = %d", err);
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
     }
@@ -736,19 +737,29 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr)
     return NULL;
 }
 
-int64_t wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
+int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
 {
-    int err = 0;
     PyObject** body = client->response.body;
     int64_t wsgi_content_length = client->response.wsgi_content_length;
 
     if (PyBytes_CheckExact(wsgi_body)) {
+        ssize_t body_size = PyBytes_GET_SIZE(wsgi_body);
+        if (body_size == 0) {
+            client->response.body_total_size = 0;
+            client->response.body_preloaded_size = 0;
+            return 0;  // response without body
+        }
         body[0] = wsgi_body;
         Py_INCREF(wsgi_body);  // Reasone: wsgi_body inserted into body chunks array
         client->response.body_chunk_num = 1;
-        client->response.body_total_size = PyBytes_GET_SIZE(wsgi_body);
-        client->response.body_preloaded_size = PyBytes_GET_SIZE(wsgi_body);
-        return client->response.body_preloaded_size;
+        client->response.body_total_size = body_size;
+        client->response.body_preloaded_size = body_size;
+        return 1;  // response has body
+    }
+    if (wsgi_content_length == 0) {
+        client->response.body_total_size = 0;
+        client->response.body_preloaded_size = 0;
+        return 0;  // response without body
     }
     PyObject* iterator = client->response.body_iterator;
     if (!iterator)
@@ -759,59 +770,73 @@ int64_t wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
     // Flask: ClosingIterator, FileWrapper (buffer_size)
     // Falcon: CloseableStreamIterator (_block_size)
     if (body_type && body_type[0] == 'F' && strcmp(body_type, "FileWrapper") == 0) {
-        // FIXME: add custom FileWrapper via wsgi.file_wrapper (sending unlimit body chunks)
-        if (PyObject_HasAttrString(wsgi_body, "buffer_size")) {
-            if (wsgi_content_length == 0) {
-                LOGi("wsgi_body: detect file size = 0");
-                return 0;  // zero size file
-            }
-            if (wsgi_content_length < 0) {
-                LOGc("wsgi_body: unknown size of transferred file!");
-                return -5;
-            }
-            if (wsgi_content_length > max_read_file_buffer_size) {
-                LOGc("wsgi_body: transferred file is too large! (max len = %d)", max_read_file_buffer_size);
-                return -6;
-            }
-            PyObject * buf_size = PyLong_FromLong(max_read_file_buffer_size);
-            int error = PyObject_SetAttrString(wsgi_body, "buffer_size", buf_size);
-            Py_DECREF(buf_size);
+        // This hack increases the speed of reading a file from a Flask
+        PyObject * orig_buffer_size = PyObject_GetAttr(wsgi_body, g_cv.buffer_size); // refcnt: 1 -> 2
+        if (orig_buffer_size != NULL) {
+            Py_ssize_t refcnt = Py_REFCNT(orig_buffer_size);  // refcnt = 2
+            PyObject * buf_size = PyLong_FromLong(g_srv.max_chunk_size);
+            int error = PyObject_SetAttr(wsgi_body, g_cv.buffer_size, buf_size); // if OK then refcnt: 2 -> 1
             if (error) {
-                LOGc("wsgi_body: failed to change file read buffer size");
-                return -8;
+                LOGw("wsgi_body: failed to change file read buffer size (Flask.FileWrapper)");
+                if (refcnt == Py_REFCNT(orig_buffer_size)) {  // if (refcnt == 2)
+                    Py_DECREF(orig_buffer_size);  // refcnt: 2 -> 1
+                }
+            } else {
+                Py_DECREF(orig_buffer_size); // destroy object
             }
+            Py_DECREF(buf_size); // refcnt: 2 -> 1
         }
     }
     PyObject* item = NULL;
+    int is_filelike = 0;
+    int fully_loaded = 1;
+    ssize_t prev_size = 0;
     size_t chunks = 0;
     while (item = wsgi_iterator_get_next_chunk(client, 1)) {
+        ssize_t item_size = PyBytes_GET_SIZE(item);
         body[chunks++] = item;
         client->response.body_chunk_num = chunks;
-        client->response.body_preloaded_size += PyBytes_GET_SIZE(item);
+        client->response.body_preloaded_size += item_size;
+        if (chunks == 1 && Py_REFCNT(item) == 1) {
+            LOGd("wsgi_body: detect reading from filelike object!");
+            is_filelike = 1;
+        }
         if (chunks == max_preloaded_body_chunks + 1) {
-            // FIXME: add support sending unlimit body chunks
-            err = -12;  // overflow!
+            fully_loaded = 0;
             break;
         }
+        if (is_filelike) {
+            // Only filelike data source check for max chunk size
+            if (client->response.body_preloaded_size + prev_size >= g_srv.max_chunk_size) {
+                LOGd("wsgi_body: overflow chunk buffer! Preloaded size = %d", client->response.body_preloaded_size);
+                fully_loaded = 0;
+                break;
+            }
+        }
+        prev_size = item_size;
     }
     if (client->error) {
         // wsgi_body: incorrect content
         return -13;
     }
-    if (err == 0) {
+    if (fully_loaded) {
+        if (wsgi_content_length > 0 && client->response.body_preloaded_size > wsgi_content_length) {
+            LOGc("wsgi_body: real size of the response body exceeds the specified Content-Length");
+            return -14;
+        }
         LOGi("wsgi_body: response body fully loaded! (size = %lld)", client->response.body_preloaded_size);
         client->response.body_total_size = client->response.body_preloaded_size;
-        return client->response.body_total_size;
+        return 1;
     }
     if (client->response.body_preloaded_size == wsgi_content_length) {
         LOGi("wsgi_body: response body fully loaded! (SIZE = %lld)", wsgi_content_length);
         client->response.body_total_size = wsgi_content_length;
-        return wsgi_content_length;
+        return 1;
     }
     // FIXME: add support send body unknown length
     client->error = 1;
     LOGc("wsgi_body: body's chunks overflow (max = %d chunks)", max_preloaded_body_chunks);
-    return err;
+    return -15;
 }
 
 void init_request_dict()
