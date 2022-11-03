@@ -74,6 +74,7 @@ typedef struct {
         PyObject* body[max_preloaded_body_chunks + 1]; // pleloaded body's chunks (PyBytes)
         int64_t body_preloaded_size; // sum of all preloaded body's chunks
         int64_t body_total_size;
+        int64_t body_total_written;
         write_req_t write_req;
     } response;
 } client_t;
@@ -83,6 +84,7 @@ extern server_t g_srv;
 PyObject* run_server(PyObject* self, PyObject* args);
 
 void free_start_response(client_t * client);
+void reset_response_preload(client_t * client);
 void reset_response_body(client_t * client);
 
 int x_send_status(client_t * client, int status);

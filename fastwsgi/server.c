@@ -12,6 +12,10 @@
 
 server_t g_srv;
 
+void alloc_cb(uv_handle_t * handle, size_t suggested_size, uv_buf_t * buf);
+void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf);
+int stream_write(client_t * client);
+
 void free_read_buffer(client_t * client, void * data)
 {
     for (size_t i = 0; i < ARRAY_SIZE(client->rbuf); i++) {
@@ -96,35 +100,78 @@ int x_send_status(client_t * client, int status)
 
 void write_cb(uv_write_t * req, int status)
 {
-    LOGe_IF(status, "Write error %s\n", uv_strerror(status));
     write_req_t * wreq = (write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
+    if (status != 0) {
+        LOGe("%s: Write error: %s", __func__, uv_strerror(status));
+        goto fin;
+    }
+    client->response.body_total_written += client->response.body_preloaded_size;
+    reset_response_preload(client);        
+    int64_t body_total_size = client->response.body_total_size;
+    if (client->response.body_total_written > body_total_size) {
+        LOGc("$s: ERROR: body_total_written > body_total_size", __func__);
+        status = -1; // critical error -> close_connection
+        goto fin;
+    }
+    if (client->response.body_total_written == body_total_size) {
+        LOGd("%s: Response body is completely streamed. body_total_size = %lld", __func__, body_total_size);
+        goto fin;
+    }
+    client->error = 0;
+    PyObject * chunk = wsgi_iterator_get_next_chunk(client, 0);
+    if (!chunk) {
+        if (client->error) {
+            LOGe("%s: ERROR on read response body", __func__);
+            status = -1; // error -> close_connection
+            goto fin;
+        }
+        LOGd("%s: end of iterable response body", __func__);
+        goto fin;
+    }
+    client->response.body[0] = chunk;
+    client->response.body_chunk_num = 1;
+    client->response.body_preloaded_size = PyBytes_GET_SIZE(chunk);
+    client->response.headers_size = 0; // ignore head buffer
+    stream_write(client);
+    return;
+
+fin:
+    uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
     reset_response_body(client);
     wreq->client = NULL;  // free write_req
+    if (status < 0) {
+        close_connection(client);
+    }
 }
 
 int stream_write(client_t * client)
 {
-    if (client->response.headers_size == 0)
-        return CA_OK; // error ???
-    if (!client->head.data || client->head.size == 0)
-        return CA_OK; // error ???
     write_req_t * wreq = &client->response.write_req;
+    uv_buf_t * buf = wreq->bufs;
     int total_len = 0;
-    int nbufs = 1;
-    wreq->bufs[0].base = client->head.data;
-    wreq->bufs[0].len = client->head.size;
-    total_len += wreq->bufs[0].len;
+    int nbufs = 0;
+    if (client->response.headers_size > 0) {
+        if (client->response.headers_size != client->head.size)
+            return CA_OK; // error ???
+        buf->base = client->head.data;
+        buf->len = client->head.size;
+        buf++;
+        nbufs++;
+        total_len += client->head.size;
+    }
     if (client->response.body_preloaded_size > 0) {
         for (size_t i = 0; i < client->response.body_chunk_num; i++) {
             Py_ssize_t size = PyBytes_GET_SIZE(client->response.body[i]);
             char * data = PyBytes_AS_STRING(client->response.body[i]);
-            wreq->bufs[i+1].base = data;
-            wreq->bufs[i+1].len = (unsigned int)size;
+            buf->base = data;
+            buf->len = (unsigned int)size;
+            buf++;
             nbufs++;
             total_len += (int)size;
         }
     }
+    uv_read_stop((uv_stream_t*)client);
     LOGi("%s: %d bytes", __func__, total_len);
     wreq->client = client;
     uv_write((uv_write_t*)wreq, (uv_stream_t*)client, wreq->bufs, nbufs, write_cb);

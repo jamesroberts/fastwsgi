@@ -101,17 +101,22 @@ void free_start_response(client_t * client)
     }
 }
 
-void reset_response_body(client_t * client)
+void reset_response_preload(client_t * client)
 {
     size_t chunks = client->response.body_chunk_num;
     if (chunks || client->response.wsgi_body) {
-        LOGd("reset_response_body: chunks = %d, wsgi_body = %p", (int)chunks, client->response.wsgi_body);
+        LOGt("%s: chunks = %d, wsgi_body = %p", __func__, (int)chunks, client->response.wsgi_body);
     }
     for (size_t i = 0; i < chunks; i++) {
         Py_XDECREF(client->response.body[i]);
     }
     client->response.body_chunk_num = 0;
     client->response.body_preloaded_size = 0;
+}
+
+void reset_response_body(client_t * client)
+{
+    reset_response_preload(client);
     client->response.body_total_size = 0;
 
     if (client->response.wsgi_body) {
@@ -124,6 +129,7 @@ void reset_response_body(client_t * client)
     }
     Py_CLEAR(client->response.wsgi_body);
     client->response.body_iterator = NULL;
+    client->response.body_total_written = 0;
 }
 
 // ============== request processing ==================================================
@@ -830,6 +836,11 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
     }
     if (client->response.body_preloaded_size == wsgi_content_length) {
         LOGi("wsgi_body: response body fully loaded! (SIZE = %lld)", wsgi_content_length);
+        client->response.body_total_size = wsgi_content_length;
+        return 1;
+    }
+    if (wsgi_content_length > 0) {
+        LOGd("wsgi_body: large content transfer begins. body_total_size = %lld", wsgi_content_length);
         client->response.body_total_size = wsgi_content_length;
         return 1;
     }
