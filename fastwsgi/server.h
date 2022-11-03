@@ -17,7 +17,7 @@ static const int def_max_content_length = 999999999;
 typedef struct {
     uv_write_t req;  // Placement strictly at the beginning of the structure!
     void * client;   // NULL = not sending
-    uv_buf_t bufs[max_preloaded_body_chunks + 2];
+    uv_buf_t bufs[max_preloaded_body_chunks + 3];
 } write_req_t;
 
 typedef struct {
@@ -75,6 +75,7 @@ typedef struct {
         int64_t body_preloaded_size; // sum of all preloaded body's chunks
         int64_t body_total_size;
         int64_t body_total_written;
+        int chunked;    // 1 = chunked sending; 2 = last chunk send
         write_req_t write_req;
     } response;
 } client_t;

@@ -107,16 +107,22 @@ void write_cb(uv_write_t * req, int status)
         goto fin;
     }
     client->response.body_total_written += client->response.body_preloaded_size;
-    reset_response_preload(client);        
-    int64_t body_total_size = client->response.body_total_size;
-    if (client->response.body_total_written > body_total_size) {
-        LOGc("$s: ERROR: body_total_written > body_total_size", __func__);
-        status = -1; // critical error -> close_connection
+    reset_response_preload(client);
+    if (client->response.chunked == 2) {
+        LOGd("%s: last chunk sended!", __func__);
         goto fin;
     }
-    if (client->response.body_total_written == body_total_size) {
-        LOGd("%s: Response body is completely streamed. body_total_size = %lld", __func__, body_total_size);
-        goto fin;
+    if (client->response.chunked == 0) {
+        int64_t body_total_size = client->response.body_total_size;
+        if (client->response.body_total_written > body_total_size) {
+            LOGc("%s: ERROR: body_total_written > body_total_size", __func__);
+            status = -1; // critical error -> close_connection
+            goto fin;
+        }
+        if (client->response.body_total_written == body_total_size) {
+            LOGd("%s: Response body is completely streamed. body_total_size = %lld", __func__, body_total_size);
+            goto fin;
+        }
     }
     client->error = 0;
     PyObject * chunk = wsgi_iterator_get_next_chunk(client, 0);
@@ -126,13 +132,30 @@ void write_cb(uv_write_t * req, int status)
             status = -1; // error -> close_connection
             goto fin;
         }
+        if (client->response.chunked == 1) {
+            xbuf_reset(&client->head);
+            xbuf_add_str(&client->head, "0\r\n\r\n");
+            client->response.headers_size = client->head.size;
+            client->response.chunked = 2;            
+            stream_write(client);
+            LOGd("%s: end of iterable response body (chunked)", __func__);
+            return;
+        }
         LOGd("%s: end of iterable response body", __func__);
         goto fin;
     }
+    Py_ssize_t csize = PyBytes_GET_SIZE(chunk);
+    xbuf_reset(&client->head);
+    if (client->response.chunked == 0) {
+        client->response.headers_size = 0; // data without header
+    } else {
+        char * buf = xbuf_expand(&client->head, 48);
+        client->head.size += sprintf(buf, "%X\r\n", (int)csize);
+        client->response.headers_size = client->head.size;
+    }
     client->response.body[0] = chunk;
     client->response.body_chunk_num = 1;
-    client->response.body_preloaded_size = PyBytes_GET_SIZE(chunk);
-    client->response.headers_size = 0; // ignore head buffer
+    client->response.body_preloaded_size = csize;
     stream_write(client);
     return;
 
@@ -170,6 +193,13 @@ int stream_write(client_t * client)
             nbufs++;
             total_len += (int)size;
         }
+    }
+    if (client->response.chunked == 1) {
+        buf->base = "\r\n";
+        buf->len = 2;
+        buf++;
+        nbufs++;
+        total_len += 2;
     }
     uv_read_stop((uv_stream_t*)client);
     LOGi("%s: %d bytes", __func__, total_len);

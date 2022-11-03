@@ -130,6 +130,7 @@ void reset_response_body(client_t * client)
     Py_CLEAR(client->response.wsgi_body);
     client->response.body_iterator = NULL;
     client->response.body_total_written = 0;
+    client->response.chunked = 0;
 }
 
 // ============== request processing ==================================================
@@ -651,6 +652,17 @@ int build_response(client_t * client, int flags, int status, const void * header
         goto end;
     }
 
+    if (client->response.chunked) {
+        xbuf_add_str(head, "Transfer-Encoding: chunked\r\n");
+        LOGi("Added Header 'Transfer-Encoding: chunked'");
+        xbuf_add(head, "\r\n", 2);  // end of headers
+        if (client->response.body_preloaded_size >= INT_MAX)
+            return -7;  // critical error
+        char * buf = xbuf_expand(head, 48);
+        head->size += sprintf(buf, "%X\r\n", (int)client->response.body_preloaded_size);
+        goto fin;
+    }
+
     if (body_size == 0) {
         reset_response_body(client);
     }
@@ -662,7 +674,7 @@ int build_response(client_t * client, int flags, int status, const void * header
         client->response.body_preloaded_size = body_size;
         client->response.body_total_size = body_size;
     }
-    body_size = client->response.body_total_size;  // FIXME: add support "Transfer-Encoding: chunked"
+    body_size = client->response.body_total_size;
 
 end:
     if (body_size == 0) {
@@ -676,6 +688,7 @@ end:
     }
     xbuf_add(head, "\r\n", 2);  // end of headers
 
+fin:
     LOGt(head->data);
     LOGt_IF(body_size > 0 && client->response.body_chunk_num, PyBytes_AS_STRING(body[0]));
     client->response.headers_size = head->size;
@@ -844,10 +857,9 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
         client->response.body_total_size = wsgi_content_length;
         return 1;
     }
-    // FIXME: add support send body unknown length
-    client->error = 1;
-    LOGc("wsgi_body: body's chunks overflow (max = %d chunks)", max_preloaded_body_chunks);
-    return -15;
+    client->response.chunked = 1;  // wsgi_content_length == -1
+    LOGi("wsgi_body: chunked content transfer begins (unknown size of body)");
+    return 2;
 }
 
 void init_request_dict()
