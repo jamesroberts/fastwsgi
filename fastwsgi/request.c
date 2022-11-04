@@ -218,10 +218,14 @@ int on_header_field_complete(llhttp_t * parser)
 {
     client_t * client = (client_t *)parser->data;
     xbuf_t * buf = &client->head;
-    LOGi("%s: %s", __func__, buf->size ? buf->data + 5 : buf->data);
     char * data = buf->data;
     ssize_t size = buf->size;
-    for (ssize_t i = 0; i < size; i++) {
+    if (size <= 5) {
+        LOGi("%s: Unnamed field!");        
+        goto fin;
+    }
+    LOGi("%s: %s", __func__, data + 5);
+    for (ssize_t i = 5; i < size; i++) {
         const char symbol = data[i];
         if (symbol == '_') {  // CVE-2015-0219 
             xbuf_reset(buf);
@@ -238,6 +242,7 @@ int on_header_field_complete(llhttp_t * parser)
         }
         data[i] = toupper(symbol);
     }
+fin:
     xbuf_add(buf, "\0", 1);  // add empty value
     client->request.current_val_len = 0;
     return 0;
@@ -276,7 +281,7 @@ int on_header_value_complete(llhttp_t * parser)
     char * key = buf->data;
     char * val = buf->data + key_len + 1;
     LOGi("%s: '%s'", __func__, val);
-    if (key_len == 0) {
+    if (key_len <= 5) {
         LOGw("%s: Headers has an unnamed value!", __func__);        
         return 0;  // skip incorrect header
     }
