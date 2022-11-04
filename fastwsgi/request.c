@@ -135,6 +135,12 @@ void reset_response_body(client_t * client)
 
 // ============== request processing ==================================================
 
+int on_reset(llhttp_t * parser)
+{
+    LOGf("%s: Detect HTTP pipelining! Pipelining not supported!", __func__);
+    return -1;
+}
+
 int on_message_begin(llhttp_t * parser)
 {
     LOGi("on_message_begin: ------------------------------");
@@ -892,6 +898,7 @@ void init_request_dict()
 void configure_parser_settings(llhttp_settings_t * ps)
 {
     llhttp_settings_init(ps);
+    ps->on_reset = on_reset;
     ps->on_message_begin = on_message_begin;
     ps->on_url = on_url;
     ps->on_url_complete = on_url_complete;

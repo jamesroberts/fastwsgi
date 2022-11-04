@@ -328,6 +328,10 @@ fin:
             err = HTTP_STATUS_BAD_REQUEST;
         act = send_error(client, err, NULL);
     }
+    if (client->request.load_state >= LS_MSG_END) {
+        llhttp_reset(&client->request.parser);
+        client->request.load_state = LS_WAIT;
+    }
     if (act == CA_SHUTDOWN) {
         uv_read_stop(handle);
         shutdown_connection(client);
