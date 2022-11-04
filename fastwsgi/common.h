@@ -49,4 +49,6 @@ void logrepr(int level, PyObject * obj);
 
 int64_t get_env_int(const char * name);
 
+const char * get_http_status_name(int status);
+
 #endif

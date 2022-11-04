@@ -86,9 +86,12 @@ int x_send_status(client_t * client, int status)
     size_t buf_size = sizeof(x_write_req_t) + 640;
     x_write_req_t * wreq = (x_write_req_t *)malloc(buf_size);
     wreq->client = client;
+    const char * status_name = get_http_status_name(status);
+    if (!status_name)
+        status_name = "_unknown_";
     char * buf = wreq->data;
     int len = 0;
-    len += sprintf(buf + len, "HTTP/1.1 %d\r\n", status);
+    len += sprintf(buf + len, "HTTP/1.1 %d %s\r\n", status, status_name);
     //len += sprintf(buf + len, "Content-Length: 0\r\n");
     len += sprintf(buf + len, "\r\n");
     wreq->buf.len = len;

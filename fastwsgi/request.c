@@ -606,7 +606,7 @@ int build_response(client_t * client, int flags, int status, const void * header
         reset_response_body(client);  // forced reset body buffers
     }
 
-    const char * status_name = llhttp_status_name(status);
+    const char * status_name = get_http_status_name(status);
     if (!status_name)
         return -3;
 

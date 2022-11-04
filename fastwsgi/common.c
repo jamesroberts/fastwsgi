@@ -1,4 +1,5 @@
 #include "common.h"
+#include "llhttp.h"
 
 void logrepr(int level, PyObject* obj)
 {
@@ -8,6 +9,17 @@ void logrepr(int level, PyObject* obj)
     LOGX(level, "REPR: %s", bytes);
     Py_XDECREF(repr);
     Py_XDECREF(str);
+}
+
+const char * get_http_status_name(int status)
+{
+#define HTTP_STATUS_GEN(NUM, NAME, STRING) case HTTP_STATUS_##NAME: return #STRING;
+    switch (status) {
+        HTTP_STATUS_MAP(HTTP_STATUS_GEN)
+    default: return NULL;
+    }
+#undef HTTP_STATUS_GEN
+    return NULL;
 }
 
 int64_t get_env_int(const char * name)
