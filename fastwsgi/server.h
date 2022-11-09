@@ -14,6 +14,13 @@ static const size_t MAX_max_chunk_size = 64*1024*1024;
 
 static const int def_max_content_length = 999999999;
 
+enum {
+    MIN_read_buffer_size = 2 * 1024,
+    def_read_buffer_size = 64 * 1024,
+    MAX_read_buffer_size = 4 * 1024 * 1024
+};
+
+
 typedef struct {
     uv_write_t req;  // Placement strictly at the beginning of the structure!
     void * client;   // NULL = not sending
@@ -29,6 +36,7 @@ typedef struct {
     char* host;
     int port;
     int backlog;
+    size_t read_buffer_size;
     uint64_t max_content_length;
     size_t max_chunk_size;
 } server_t;
@@ -78,6 +86,9 @@ typedef struct {
         int chunked;    // 1 = chunked sending; 2 = last chunk send
         write_req_t write_req;
     } response;
+    // preallocated buffers
+    char buf_head_prealloc[2*1024];
+    char buf_read_prealloc[1];
 } client_t;
 
 extern server_t g_srv;

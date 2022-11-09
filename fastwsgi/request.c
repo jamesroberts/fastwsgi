@@ -147,7 +147,7 @@ int on_message_begin(llhttp_t * parser)
     client_t * client = (client_t *)parser->data;
     client->request.load_state = LS_MSG_BEGIN;
     if (client->head.data == NULL)
-        xbuf_init(&client->head, NULL, 2*1024);
+        xbuf_init2(&client->head, client->buf_head_prealloc, sizeof(client->buf_head_prealloc));
     //client->request.keep_alive = 0;
     client->error = 0;
     if (client->response.write_req.client != NULL) {

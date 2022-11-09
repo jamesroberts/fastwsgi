@@ -344,25 +344,28 @@ fin:
     }
 }
 
-#define def_read_buffer_size (64*1024)
-
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 {
-    LOGt("%s: size = %d", __func__, (int)suggested_size);
+    const int read_buffer_size = (int)g_srv.read_buffer_size;
+    LOGt("%s: size = %d (suggested = %d)", __func__, read_buffer_size, (int)suggested_size);
     client_t * client = (client_t *)handle;
     buf->base = NULL;
     buf->len = 0;
 
+    int buf_prealloc = 0;
     xbuf_t * rb = NULL;
     for (size_t i = 0; i < ARRAY_SIZE(client->rbuf); i++) {
         xbuf_t * r_buf = &client->rbuf[i];
+        if (r_buf->data == client->buf_read_prealloc)
+            buf_prealloc = 1;  // already used
+
         if (r_buf->size > 0)
             continue;  // buffer used!
 
-        if (r_buf->capacity > def_read_buffer_size) {
+        if (r_buf->capacity >= read_buffer_size) {
             // vacant preallocated buffer
-            r_buf->size = def_read_buffer_size;  // set used flag
-            buf->len = def_read_buffer_size;
+            r_buf->size = read_buffer_size;  // set used flag
+            buf->len = read_buffer_size;
             buf->base = r_buf->data;
             buf->base[0] = 0;
             //LOGi("%s: get preallocated buf %p", __func__, buf->base);
@@ -374,11 +377,16 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
     if (!rb)  // all read buffers used!
         return;  // error
 
-    int err = xbuf_init(rb, NULL, def_read_buffer_size + 1);
+    int err = 0;
+    if (buf_prealloc == 0) {
+        err = xbuf_init2(rb, client->buf_read_prealloc, read_buffer_size + 3);
+    } else {
+        err = xbuf_init(rb, NULL, read_buffer_size + 1);
+    }
     if (err)
         return;  // error
 
-    buf->len = def_read_buffer_size;
+    buf->len = read_buffer_size;
     buf->base = rb->data;
     buf->base[0] = 0;
     LOGd("%s: alloc new buffer %p (size = %d)", __func__, buf->base, (int)buf->len);
@@ -391,7 +399,7 @@ void connection_cb(uv_stream_t * server, int status)
         return;
     }
     LOGn("new connection =================================");
-    client_t* client = calloc(1, sizeof(client_t));
+    client_t* client = calloc(1, sizeof(client_t) + g_srv.read_buffer_size + 8);
     client->srv = &g_srv;
 
     uv_tcp_init(g_srv.loop, &client->handle);
@@ -493,6 +501,11 @@ PyObject * run_server(PyObject * self, PyObject * args)
     g_srv.max_chunk_size = (rv >= 0) ? (size_t)rv : (size_t)def_max_chunk_size;
     g_srv.max_chunk_size = _min(g_srv.max_chunk_size, MAX_max_chunk_size);
     g_srv.max_chunk_size = _max(g_srv.max_chunk_size, MIN_max_chunk_size);
+
+    rv = get_env_int("FASTWSGI_READ_BUFFER_SIZE");
+    g_srv.read_buffer_size = (rv >= 0) ? (size_t)rv : (size_t)def_read_buffer_size;
+    g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);
+    g_srv.read_buffer_size = _max(g_srv.read_buffer_size, MIN_read_buffer_size);
 
     main();
     Py_RETURN_NONE;
