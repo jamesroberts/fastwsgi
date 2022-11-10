@@ -6,15 +6,25 @@
 #include "request.h"
 #include "xbuf.h"
 
-#define max_read_file_buffer_size (25*1000*1000)  // FIXME: change to 128KB
 #define max_preloaded_body_chunks 48
 
+static const size_t MIN_max_chunk_size = 2*1024;
+static const size_t def_max_chunk_size = 256*1024;
+static const size_t MAX_max_chunk_size = 64*1024*1024;
+
 static const int def_max_content_length = 999999999;
+
+enum {
+    MIN_read_buffer_size = 2 * 1024,
+    def_read_buffer_size = 64 * 1024,
+    MAX_read_buffer_size = 4 * 1024 * 1024
+};
+
 
 typedef struct {
     uv_write_t req;  // Placement strictly at the beginning of the structure!
     void * client;   // NULL = not sending
-    uv_buf_t bufs[max_preloaded_body_chunks + 2];
+    uv_buf_t bufs[max_preloaded_body_chunks + 3];
 } write_req_t;
 
 typedef struct {
@@ -26,7 +36,9 @@ typedef struct {
     char* host;
     int port;
     int backlog;
+    size_t read_buffer_size;
     uint64_t max_content_length;
+    size_t max_chunk_size;
 } server_t;
 
 typedef enum {
@@ -46,7 +58,7 @@ typedef struct {
     xbuf_t rbuf[2];      // buffers for reading from socket
     struct {
         int load_state;
-        int http_content_length; // -1 = "Content-Length" not specified
+        int64_t http_content_length; // -1 = "Content-Length" not specified
         int chunked;             // Transfer-Encoding: chunked
         int keep_alive;          // 1 = Connection: Keep-Alive or HTTP/1.1
         int expect_continue;     // 1 = Expect: 100-continue
@@ -55,7 +67,7 @@ typedef struct {
         PyObject* headers;     // PyDict
         PyObject* wsgi_input_empty;  // empty io.ByteIO object for requests without body
         PyObject* wsgi_input;  // type: io.BytesIO
-        int wsgi_input_size;   // total size of wsgi_input PyBytes stream
+        int64_t wsgi_input_size;   // total size of wsgi_input PyBytes stream
         llhttp_t parser;
     } request;
     int error;    // error code on process request and response
@@ -63,15 +75,20 @@ typedef struct {
     StartResponse * start_response;
     struct {
         int headers_size;        // size of headers for sending
-        int wsgi_content_length; // -1 = "Content-Length" not specified
+        int64_t wsgi_content_length; // -1 = "Content-Length" not specified
         PyObject* wsgi_body;
         PyObject* body_iterator;
-        int body_chunk_num;
+        size_t body_chunk_num;
         PyObject* body[max_preloaded_body_chunks + 1]; // pleloaded body's chunks (PyBytes)
-        int body_preloaded_size; // sum of all preloaded body's chunks
-        int body_total_size;
+        int64_t body_preloaded_size; // sum of all preloaded body's chunks
+        int64_t body_total_size;
+        int64_t body_total_written;
+        int chunked;    // 1 = chunked sending; 2 = last chunk send
         write_req_t write_req;
     } response;
+    // preallocated buffers
+    char buf_head_prealloc[2*1024];
+    char buf_read_prealloc[1];
 } client_t;
 
 extern server_t g_srv;
@@ -79,6 +96,7 @@ extern server_t g_srv;
 PyObject* run_server(PyObject* self, PyObject* args);
 
 void free_start_response(client_t * client);
+void reset_response_preload(client_t * client);
 void reset_response_body(client_t * client);
 
 int x_send_status(client_t * client, int status);

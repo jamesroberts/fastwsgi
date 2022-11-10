@@ -34,10 +34,13 @@ typedef struct {
 
     PyObject* module_io;
     PyObject* BytesIO;
+    PyObject* close;
     PyObject* write;
     PyObject* read;
     PyObject* truncate;
     PyObject* seek;
+    PyObject* tell;
+    PyObject* buffer_size;
     PyObject* getvalue;
     PyObject* comma;
 

@@ -101,17 +101,22 @@ void free_start_response(client_t * client)
     }
 }
 
-void reset_response_body(client_t * client)
+void reset_response_preload(client_t * client)
 {
-    int chunks = client->response.body_chunk_num;
+    size_t chunks = client->response.body_chunk_num;
     if (chunks || client->response.wsgi_body) {
-        LOGd("reset_response_body: chunks = %d, wsgi_body = %p", chunks, client->response.wsgi_body);
+        LOGt("%s: chunks = %d, wsgi_body = %p", __func__, (int)chunks, client->response.wsgi_body);
     }
-    for (int i = 0; i < chunks; i++) {
+    for (size_t i = 0; i < chunks; i++) {
         Py_XDECREF(client->response.body[i]);
     }
     client->response.body_chunk_num = 0;
     client->response.body_preloaded_size = 0;
+}
+
+void reset_response_body(client_t * client)
+{
+    reset_response_preload(client);
     client->response.body_total_size = 0;
 
     if (client->response.wsgi_body) {
@@ -123,9 +128,18 @@ void reset_response_body(client_t * client)
         }
     }
     Py_CLEAR(client->response.wsgi_body);
+    client->response.body_iterator = NULL;
+    client->response.body_total_written = 0;
+    client->response.chunked = 0;
 }
 
 // ============== request processing ==================================================
+
+int on_reset(llhttp_t * parser)
+{
+    LOGf("%s: Detect HTTP pipelining! Pipelining not supported!", __func__);
+    return -1;
+}
 
 int on_message_begin(llhttp_t * parser)
 {
@@ -133,7 +147,7 @@ int on_message_begin(llhttp_t * parser)
     client_t * client = (client_t *)parser->data;
     client->request.load_state = LS_MSG_BEGIN;
     if (client->head.data == NULL)
-        xbuf_init(&client->head, NULL, 2*1024);
+        xbuf_init2(&client->head, client->buf_head_prealloc, sizeof(client->buf_head_prealloc));
     //client->request.keep_alive = 0;
     client->error = 0;
     if (client->response.write_req.client != NULL) {
@@ -210,12 +224,22 @@ int on_header_field_complete(llhttp_t * parser)
 {
     client_t * client = (client_t *)parser->data;
     xbuf_t * buf = &client->head;
-    LOGi("%s: %s", __func__, buf->size ? buf->data + 5 : buf->data);
     char * data = buf->data;
     ssize_t size = buf->size;
-    for (ssize_t i = 0; i < size; i++) {
+    if (size <= 5) {
+        LOGi("%s: Unnamed field!");        
+        goto fin;
+    }
+    LOGi("%s: %s", __func__, data + 5);
+    for (ssize_t i = 5; i < size; i++) {
         const char symbol = data[i];
-        if (symbol == '_' || (unsigned char)symbol > 127) {
+        if (symbol == '_') {  // CVE-2015-0219 
+            xbuf_reset(buf);
+            client->request.current_key_len = 0;
+            client->request.current_val_len = 0;
+            return 0;  // skip incorrect header
+        }
+        if ((unsigned char)symbol >= 127) {
             continue;
         }
         if (symbol == '-') {
@@ -224,6 +248,7 @@ int on_header_field_complete(llhttp_t * parser)
         }
         data[i] = toupper(symbol);
     }
+fin:
     xbuf_add(buf, "\0", 1);  // add empty value
     client->request.current_val_len = 0;
     return 0;
@@ -240,9 +265,7 @@ int on_header_value(llhttp_t * parser, const char * data, size_t length)
     xbuf_t * buf = &client->head;
     if (client->request.current_val_len == 0) {
         if (client->request.current_key_len == 0) {
-            client->error = 1;
-            LOGc("%s: Headers has an unnamed value!", __func__);
-            return -1;  // critical error
+            return 0;  // skip incorrect header
         }
         if (client->request.current_key_len + 1 != (size_t)buf->size) {
             client->error = 1;
@@ -264,11 +287,9 @@ int on_header_value_complete(llhttp_t * parser)
     char * key = buf->data;
     char * val = buf->data + key_len + 1;
     LOGi("%s: '%s'", __func__, val);
-    if (key_len == 0) {
-        client->error = 1;
-        LOGc("%s: Headers has an unnamed value!", __func__);
-        reset_head_buffer(client);
-        return -1;  // critical error
+    if (key_len <= 5) {
+        LOGw("%s: Headers has an unnamed value!", __func__);        
+        return 0;  // skip incorrect header
     }
     if (key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0) {
         client->request.http_content_length = 0; // field "Content-Length" present
@@ -325,7 +346,7 @@ int on_headers_complete(llhttp_t * parser)
         return -1;  // error
     }
     if (client->request.http_content_length >= 0) {
-        client->request.http_content_length = (int)clen;
+        client->request.http_content_length = clen;
     }
     if (client->request.expect_continue) {
         x_send_status(client, HTTP_STATUS_CONTINUE);
@@ -352,7 +373,7 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
         PyObject* result = PyObject_CallMethodObjArgs(wsgi_input, g_cv.seek, g_cv.i0, NULL);
         Py_DECREF(result);
     }
-    uint64_t clen = (uint64_t)client->request.wsgi_input_size + (uint64_t)length;
+    uint64_t clen = (uint64_t)client->request.wsgi_input_size + length;
     if (clen > g_srv.max_content_length) {
         client->error = 1;
         LOGc("Received too large body of HTTP request: size = %llu (expected <= %llu)", clen, g_srv.max_content_length);
@@ -388,7 +409,7 @@ int on_body(llhttp_t * parser, const char * body, size_t length)
     Py_XDECREF(body_content);
 
 fin:
-    client->request.wsgi_input_size += (int)length;
+    client->request.wsgi_input_size += length;
     return (client->error) ? -1 : 0;
 }
 
@@ -411,11 +432,11 @@ int on_message_complete(llhttp_t * parser)
     }
 
     if (client->request.http_content_length >= 0) {
-        const int clen = client->request.http_content_length;
-        const int ilen = client->request.wsgi_input_size;
+        const int64_t clen = client->request.http_content_length;
+        const int64_t ilen = client->request.wsgi_input_size;
         if (ilen != clen) {
             client->error = 1;
-            LOGc("Received body with size %d not equal specified 'Content-Length' = %d", ilen, clen);
+            LOGc("Received body with size %lld not equal specified 'Content-Length' = %lld", ilen, clen);
             return -1;
         }
     }
@@ -454,7 +475,7 @@ int on_message_complete(llhttp_t * parser)
         set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
 
     if (client->request.chunked && client->request.http_content_length < 0) {
-        sprintf(buf, "%d", client->request.wsgi_input_size);
+        sprintf(buf, "%lld", client->request.wsgi_input_size);
         set_header(client, g_cv.CONTENT_LENGTH, buf, -1, 0);
         // Insertion of this header is allowed because the header "Transfer-Encoding" FastWSGI server removes!
         // https://peps.python.org/pep-3333/#other-http-features
@@ -524,8 +545,8 @@ int process_wsgi_response(client_t * client)
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
     }
-    int len = wsgi_body_pleload(client, wsgi_body);
-    if (len < 0) {
+    err = wsgi_body_pleload(client, wsgi_body);
+    if (err < 0) {
         LOGc("wsgi_body_pleload return error = %d", err);
         err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
         goto fin;
@@ -564,12 +585,13 @@ int create_response(client_t * client)
     return err;
 }
 
-int build_response(client_t * client, int flags, int status, const void * headers, const void * body_data, int body_size)
+int build_response(client_t * client, int flags, int status, const void * headers, const void * body_data, int _body_size)
 {
     xbuf_t * head = &client->head;
     reset_head_buffer(client);
     PyObject** body = client->response.body;
     StartResponse * response = NULL;
+    int64_t body_size = _body_size;
 
     if (flags & RF_HEADERS_PYLIST) {
         response = (StartResponse *)headers;
@@ -590,7 +612,7 @@ int build_response(client_t * client, int flags, int status, const void * header
         reset_response_body(client);  // forced reset body buffers
     }
 
-    const char * status_name = llhttp_status_name(status);
+    const char * status_name = get_http_status_name(status);
     if (!status_name)
         return -3;
 
@@ -609,6 +631,10 @@ int build_response(client_t * client, int flags, int status, const void * header
                 if (strcasecmp(key, "Content-Length") == 0)
                     continue;  // skip "Content-Length" header
 
+            if (key_len == 10)
+                if (strcasecmp(key, "Connection") == 0)
+                    continue;  // skip "Connection" header
+
             size_t value_len = 0;
             const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
@@ -625,7 +651,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     }
 
     if (flags & RF_SET_KEEP_ALIVE) {
-        xbuf_add_str(head, "Connection: Keep-Alive\r\n");
+        xbuf_add_str(head, "Connection: keep-alive\r\n");
     } else {
         xbuf_add_str(head, "Connection: close\r\n");
     }
@@ -637,18 +663,29 @@ int build_response(client_t * client, int flags, int status, const void * header
         goto end;
     }
 
+    if (client->response.chunked) {
+        xbuf_add_str(head, "Transfer-Encoding: chunked\r\n");
+        LOGi("Added Header 'Transfer-Encoding: chunked'");
+        xbuf_add(head, "\r\n", 2);  // end of headers
+        if (client->response.body_preloaded_size >= INT_MAX)
+            return -7;  // critical error
+        char * buf = xbuf_expand(head, 48);
+        head->size += sprintf(buf, "%X\r\n", (int)client->response.body_preloaded_size);
+        goto fin;
+    }
+
     if (body_size == 0) {
         reset_response_body(client);
     }
     if (body_data && body_size > 0) {
         reset_response_body(client);
-        PyObject * buf = PyBytes_FromStringAndSize((const char *)body_data, body_size);
+        PyObject * buf = PyBytes_FromStringAndSize((const char *)body_data, (Py_ssize_t)body_size);
         body[0] = buf;
         client->response.body_chunk_num = 1;
         client->response.body_preloaded_size = body_size;
         client->response.body_total_size = body_size;
     }
-    body_size = client->response.body_total_size;  // FIXME: add support "Transfer-Encoding: chunked"
+    body_size = client->response.body_total_size;
 
 end:
     if (body_size == 0) {
@@ -657,11 +694,12 @@ end:
     }
     else if (body_size > 0) {
         char * buf = xbuf_expand(head, 48);
-        head->size += sprintf(buf, "Content-Length: %d\r\n", (int)body_size);
-        LOGi("Added Header 'Content-Length: %d'", (int)body_size);
+        head->size += sprintf(buf, "Content-Length: %lld\r\n", body_size);
+        LOGi("Added Header 'Content-Length: %lld'", body_size);
     }
     xbuf_add(head, "\r\n", 2);  // end of headers
 
+fin:
     LOGt(head->data);
     LOGt_IF(body_size > 0 && client->response.body_chunk_num, PyBytes_AS_STRING(body[0]));
     client->response.headers_size = head->size;
@@ -684,12 +722,15 @@ int get_info_from_wsgi_response(client_t * client)
         if (key_len == 14 && key[7] == '-' && strcasecmp(key, "Content-Length") == 0) {
             if (value_len == 0)
                 return -2;  // error
-            if (value_len == 1 && value[0] == '0')
-                return 0;
-            int clen = atoi(value);
-            if (clen == 0 || clen == INT_MAX)
-                return -3;  // error
-            LOGi("wsgi response: content-length = %d", clen);
+            int64_t clen;
+            if (value_len == 1 && value[0] == '0') {
+                clen = 0;
+            } else {
+                clen = strtoll(value, NULL, 10);
+                if (clen <= 0 || clen == LLONG_MAX)
+                    return -3;  // error
+            }
+            LOGi("wsgi response: content-length = %lld", clen);
             client->response.wsgi_content_length = clen;
         }
     }
@@ -728,17 +769,27 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr)
 
 int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
 {
-    int err = 0;
     PyObject** body = client->response.body;
-    int wsgi_content_length = client->response.wsgi_content_length;
+    int64_t wsgi_content_length = client->response.wsgi_content_length;
 
     if (PyBytes_CheckExact(wsgi_body)) {
+        ssize_t body_size = PyBytes_GET_SIZE(wsgi_body);
+        if (body_size == 0) {
+            client->response.body_total_size = 0;
+            client->response.body_preloaded_size = 0;
+            return 0;  // response without body
+        }
         body[0] = wsgi_body;
         Py_INCREF(wsgi_body);  // Reasone: wsgi_body inserted into body chunks array
         client->response.body_chunk_num = 1;
-        client->response.body_total_size = (int)PyBytes_GET_SIZE(wsgi_body);
-        client->response.body_preloaded_size = (int)PyBytes_GET_SIZE(wsgi_body);
-        return client->response.body_preloaded_size;
+        client->response.body_total_size = body_size;
+        client->response.body_preloaded_size = body_size;
+        return 1;  // response has body
+    }
+    if (wsgi_content_length == 0) {
+        client->response.body_total_size = 0;
+        client->response.body_preloaded_size = 0;
+        return 0;  // response without body
     }
     PyObject* iterator = client->response.body_iterator;
     if (!iterator)
@@ -749,59 +800,77 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
     // Flask: ClosingIterator, FileWrapper (buffer_size)
     // Falcon: CloseableStreamIterator (_block_size)
     if (body_type && body_type[0] == 'F' && strcmp(body_type, "FileWrapper") == 0) {
-        // FIXME: add custom FileWrapper via wsgi.file_wrapper (sending unlimit body chunks)
-        if (PyObject_HasAttrString(wsgi_body, "buffer_size")) {
-            if (wsgi_content_length == 0) {
-                LOGi("wsgi_body: detect file size = 0");
-                return 0;  // zero size file
-            }
-            if (wsgi_content_length < 0) {
-                LOGc("wsgi_body: unknown size of transferred file!");
-                return -5;
-            }
-            if (wsgi_content_length > max_read_file_buffer_size) {
-                LOGc("wsgi_body: transferred file is too large! (max len = %d)", max_read_file_buffer_size);
-                return -6;
-            }
-            PyObject * buf_size = PyLong_FromLong(max_read_file_buffer_size);
-            int error = PyObject_SetAttrString(wsgi_body, "buffer_size", buf_size);
-            Py_DECREF(buf_size);
+        // This hack increases the speed of reading a file from a Flask
+        PyObject * orig_buffer_size = PyObject_GetAttr(wsgi_body, g_cv.buffer_size); // refcnt: 1 -> 2
+        if (orig_buffer_size != NULL) {
+            Py_ssize_t refcnt = Py_REFCNT(orig_buffer_size);  // refcnt = 2
+            PyObject * buf_size = PyLong_FromLong(g_srv.max_chunk_size);
+            int error = PyObject_SetAttr(wsgi_body, g_cv.buffer_size, buf_size); // if OK then refcnt: 2 -> 1
             if (error) {
-                LOGc("wsgi_body: failed to change file read buffer size");
-                return -8;
+                LOGw("wsgi_body: failed to change file read buffer size (Flask.FileWrapper)");
+                if (refcnt == Py_REFCNT(orig_buffer_size)) {  // if (refcnt == 2)
+                    Py_DECREF(orig_buffer_size);  // refcnt: 2 -> 1
+                }
+            } else {
+                Py_DECREF(orig_buffer_size); // destroy object
             }
+            Py_DECREF(buf_size); // refcnt: 2 -> 1
         }
     }
     PyObject* item = NULL;
-    int chunks = 0;
+    int is_filelike = 0;
+    int fully_loaded = 1;
+    ssize_t prev_size = 0;
+    size_t chunks = 0;
     while (item = wsgi_iterator_get_next_chunk(client, 1)) {
+        ssize_t item_size = PyBytes_GET_SIZE(item);
         body[chunks++] = item;
         client->response.body_chunk_num = chunks;
-        client->response.body_preloaded_size += (int)PyBytes_GET_SIZE(item);
+        client->response.body_preloaded_size += item_size;
+        if (chunks == 1 && Py_REFCNT(item) == 1) {
+            LOGd("wsgi_body: detect reading from filelike object!");
+            is_filelike = 1;
+        }
         if (chunks == max_preloaded_body_chunks + 1) {
-            // FIXME: add support sending unlimit body chunks
-            err = -12;  // overflow!
+            fully_loaded = 0;
             break;
         }
+        if (is_filelike) {
+            // Only filelike data source check for max chunk size
+            if (client->response.body_preloaded_size + prev_size >= g_srv.max_chunk_size) {
+                LOGd("wsgi_body: overflow chunk buffer! Preloaded size = %d", client->response.body_preloaded_size);
+                fully_loaded = 0;
+                break;
+            }
+        }
+        prev_size = item_size;
     }
     if (client->error) {
         // wsgi_body: incorrect content
         return -13;
     }
-    if (err == 0) {
-        LOGi("wsgi_body: response body fully loaded! (size = %d)", client->response.body_preloaded_size);
+    if (fully_loaded) {
+        if (wsgi_content_length > 0 && client->response.body_preloaded_size > wsgi_content_length) {
+            LOGc("wsgi_body: real size of the response body exceeds the specified Content-Length");
+            return -14;
+        }
+        LOGi("wsgi_body: response body fully loaded! (size = %lld)", client->response.body_preloaded_size);
         client->response.body_total_size = client->response.body_preloaded_size;
-        return client->response.body_total_size;
+        return 1;
     }
     if (client->response.body_preloaded_size == wsgi_content_length) {
-        LOGi("wsgi_body: response body fully loaded! (SIZE = %d)", wsgi_content_length);
+        LOGi("wsgi_body: response body fully loaded! (SIZE = %lld)", wsgi_content_length);
         client->response.body_total_size = wsgi_content_length;
-        return wsgi_content_length;
+        return 1;
     }
-    // FIXME: add support send body unknown length
-    client->error = 1;
-    LOGc("wsgi_body: body's chunks overflow (max = %d chunks)", max_preloaded_body_chunks);
-    return err;
+    if (wsgi_content_length > 0) {
+        LOGd("wsgi_body: large content transfer begins. body_total_size = %lld", wsgi_content_length);
+        client->response.body_total_size = wsgi_content_length;
+        return 1;
+    }
+    client->response.chunked = 1;  // wsgi_content_length == -1
+    LOGi("wsgi_body: chunked content transfer begins (unknown size of body)");
+    return 2;
 }
 
 void init_request_dict()
@@ -829,6 +898,7 @@ void init_request_dict()
 void configure_parser_settings(llhttp_settings_t * ps)
 {
     llhttp_settings_init(ps);
+    ps->on_reset = on_reset;
     ps->on_message_begin = on_message_begin;
     ps->on_url = on_url;
     ps->on_url_complete = on_url_complete;

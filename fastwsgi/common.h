@@ -19,6 +19,9 @@
 # define INLINE inline
 #endif
 
+#define _max(a,b) (((a) > (b)) ? (a) : (b))
+#define _min(a,b) (((a) < (b)) ? (a) : (b))
+
 typedef union {
     struct sockaddr_storage storage;
     struct sockaddr addr; 
@@ -45,5 +48,7 @@ void logrepr(int level, PyObject * obj);
 #define LOGREPR(_level_, _msg_) if (g_log_level >= _level_) logrepr(_level_, _msg_)
 
 int64_t get_env_int(const char * name);
+
+const char * get_http_status_name(int status);
 
 #endif

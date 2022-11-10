@@ -97,6 +97,7 @@ class build_libuv(build_ext):
             self.compiler.define_macro('_FILE_OFFSET_BITS', 64)
 
         if sys.platform.startswith('linux'):
+            self.compiler.define_macro('_GNU_SOURCE', 1)
             self.compiler.add_library('dl')
             self.compiler.add_library('rt')
         elif sys.platform == 'darwin':
@@ -112,7 +113,6 @@ class build_libuv(build_ext):
             self.compiler.add_library('sendfile')
             self.compiler.add_library('socket')
         elif sys.platform == 'win32':
-            self.compiler.define_macro('_GNU_SOURCE', 1)
             self.compiler.define_macro('WIN32', 1)
             self.compiler.define_macro('_CRT_SECURE_NO_DEPRECATE', 1)
             self.compiler.define_macro('_CRT_NONSTDC_NO_DEPRECATE', 1)
