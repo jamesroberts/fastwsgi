@@ -16,12 +16,38 @@ LL_INFO        = 6
 LL_DEBUG       = 7
 LL_TRACE       = 8
 
-NUM_WORKERS = 4
-HOST = "0.0.0.0"
-PORT = 5000
-BACKLOG = 1024
-LOGLEVEL = LL_ERROR
+class _Server():
+    def __init__(self):
+        self.app = None
+        self.host = "0.0.0.0"
+        self.port = 5000
+        self.backlog = 1024
+        self.loglevel = LL_ERROR
+        self.max_content_length = None  # def value: 999999999
+        self.max_chunk_size = None      # def value: 256 KiB
+        self.read_buffer_size = None    # def value: 64 KiB
+        
+    def init(self, app, host = None, port = None, backlog = None, loglevel = None):
+        self.app = app
+        self.host = host if host else self.host
+        self.port = port if port else self.port
+        self.backlog = backlog if backlog else self.backlog
+        self.loglevel = loglevel if loglevel is not None else self.loglevel
+        return _fastwsgi.init_server(self)
 
+    def run(self):
+        ret = _fastwsgi.run_server(self)
+        self.close()
+        return ret
+        
+    def close(self):
+        return _fastwsgi.close_server(self)
+
+server = _Server()
+
+# -------------------------------------------------------------------------------------
+
+NUM_WORKERS = 4
 
 def run_multi_process_server(app):
     workers = []
@@ -32,9 +58,10 @@ def run_multi_process_server(app):
             print(f"Worker process added with PID: {pid}")
         else:
             try:
-                _fastwsgi.run_server(app, HOST, PORT, BACKLOG, LOGLEVEL)
+                server.init(app)
+                server.run()
             except KeyboardInterrupt:
-                exit()
+                sys.exit(0)
 
     try:
         for _ in range(NUM_WORKERS):
@@ -65,12 +92,13 @@ def print_server_details(host, port):
     print(f"Host: {host}\nPort: {port}")
     print("==================\n")
 
+# -------------------------------------------------------------------------------------
 
 @click.command()
 @click.version_option(version=get_distribution("fastwsgi").version, message="%(version)s")
-@click.option("--host", help="Host the socket is bound to.", type=str, default=HOST, show_default=True)
-@click.option("-p", "--port", help="Port the socket is bound to.", type=int, default=PORT, show_default=True)
-@click.option("-l", "--loglevel", help="Logging level.", type=int, default=LOGLEVEL, show_default=True)
+@click.option("--host", help="Host the socket is bound to.", type=str, default=server.host, show_default=True)
+@click.option("-p", "--port", help="Port the socket is bound to.", type=int, default=server.port, show_default=True)
+@click.option("-l", "--loglevel", help="Logging level.", type=int, default=server.loglevel, show_default=True)
 @click.argument(
     "wsgi_app_import_string",
     type=str,
@@ -87,13 +115,16 @@ def run_from_cli(host, port, wsgi_app_import_string, loglevel):
         sys.exit(1)
 
     print_server_details(host, port)
+    server.init(wsgi_app, host, port, loglevel = loglevel)
     print(f"Server listening at http://{host}:{port}")
-    _fastwsgi.run_server(wsgi_app, host, port, BACKLOG, loglevel)
+    server.run()
 
+# -------------------------------------------------------------------------------------
 
-def run(wsgi_app, host=HOST, port=PORT, backlog=1024, loglevel=LOGLEVEL):
+def run(wsgi_app, host = server.host, port = server.port, backlog = server.backlog, loglevel = server.loglevel):
     print_server_details(host, port)
-    print(f"Server listening at http://{host}:{port}")
     print(f"Running on PID:", os.getpid())
-    _fastwsgi.run_server(wsgi_app, host, port, backlog, loglevel)
+    server.init(wsgi_app, host, port, backlog, loglevel)
+    print(f"Server listening at http://{host}:{port}")
+    server.run()    
     # run_multi_process_server(wsgi_app)

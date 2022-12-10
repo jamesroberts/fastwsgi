@@ -29,13 +29,15 @@ typedef struct {
 
 typedef struct {
     uv_tcp_t server;  // Placement strictly at the beginning of the structure!
+    PyObject * pysrv; // object fastwsgi.py@_Server
     uv_loop_t* loop;
     uv_os_fd_t file_descriptor;
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
-    char* host;
+    char host[64];
     int port;
     int backlog;
+    uv_signal_t signal;
     size_t read_buffer_size;
     uint64_t max_content_length;
     size_t max_chunk_size;
@@ -93,7 +95,9 @@ typedef struct {
 
 extern server_t g_srv;
 
-PyObject* run_server(PyObject* self, PyObject* args);
+PyObject * init_server(PyObject * self, PyObject * server);
+PyObject * run_server(PyObject * self, PyObject * server);
+PyObject * close_server(PyObject * self, PyObject * server);
 
 void free_start_response(client_t * client);
 void reset_response_preload(client_t * client);

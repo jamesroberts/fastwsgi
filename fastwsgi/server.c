@@ -11,6 +11,7 @@
 #include "constants.h"
 
 server_t g_srv;
+static int g_srv_inited = 0;
 
 void alloc_cb(uv_handle_t * handle, size_t suggested_size, uv_buf_t * buf);
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf);
@@ -439,8 +440,12 @@ void signal_handler(uv_signal_t * req, int signum)
     }
 }
 
-int main()
+int init_srv()
 {
+    int hr = -1;
+    if (g_srv_inited)
+        return -1;
+
     g_srv.loop = uv_default_loop();
 
     configure_parser_settings(&g_srv.parser_settings);
@@ -465,48 +470,141 @@ int main()
     int err = uv_tcp_bind(&g_srv.server, (const struct sockaddr*)&addr, 0);
     if (err) {
         LOGe("Bind error %s\n", uv_strerror(err));
-        return 1;
+        hr = -5;
+        goto fin;
     }
 
     err = uv_listen((uv_stream_t*)&g_srv.server, g_srv.backlog, connection_cb);
     if (err) {
         LOGe("Listen error %s\n", uv_strerror(err));
-        return 1;
+        hr = -6;
+        goto fin;
     }
+    
+    uv_signal_init(g_srv.loop, &g_srv.signal);
+    uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
 
-    uv_signal_t signal;
-    uv_signal_init(g_srv.loop, &signal);
-    uv_signal_start(&signal, signal_handler, SIGINT);
+    g_srv_inited = 1;
+    hr = 0;
 
-    uv_run(g_srv.loop, UV_RUN_DEFAULT);
-    uv_loop_close(g_srv.loop);
-    free(g_srv.loop);
-    return 0;
+fin:
+    if (hr) {
+        if (g_srv.signal.signal_cb)
+            uv_signal_stop(&g_srv.signal);
+
+        if (hr <= -5)
+            uv_close((uv_handle_t *)&g_srv, NULL);
+
+        if (g_srv.loop)
+            uv_loop_close(g_srv.loop);
+
+        memset(&g_srv, 0, sizeof(g_srv));
+    }    
+    return hr;
 }
 
-PyObject * run_server(PyObject * self, PyObject * args)
+PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 {
     int64_t rv;
-    memset(&g_srv, 0, sizeof(g_srv));
-    int log_level = 0;
-    PyArg_ParseTuple(args, "Osiii", &g_srv.wsgi_app, &g_srv.host, &g_srv.port, &g_srv.backlog, &log_level);
-    set_log_level(log_level);
 
-    rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");
+    if (g_srv_inited) {
+        PyErr_Format(PyExc_Exception, "server already inited");
+        return PyLong_FromLong(-1000);
+    }
+    memset(&g_srv, 0, sizeof(g_srv));
+    g_srv.pysrv = server;
+
+    int64_t loglevel = get_obj_attr_int(server, "loglevel");
+    if (loglevel == LLONG_MIN) {
+        PyErr_Format(PyExc_ValueError, "Option loglevel not defined");
+        return PyLong_FromLong(-1010);
+    }
+    set_log_level((int)loglevel);
+
+    g_srv.wsgi_app = PyObject_GetAttrString(server, "app");
+    Py_XDECREF(g_srv.wsgi_app);
+    if (!g_srv.wsgi_app) {
+        PyErr_Format(PyExc_ValueError, "Option app not defined");
+        return PyLong_FromLong(-1011);
+    }    
+
+    const char * host = get_obj_attr_str(server, "host");
+    if (!host || strlen(host) >= sizeof(g_srv.host) - 1) {
+        PyErr_Format(PyExc_ValueError, "Option host not defined");
+        return PyLong_FromLong(-1012);
+    }
+    strcpy(g_srv.host, host);
+
+    int64_t port = get_obj_attr_int(server, "port");
+    if (port == LLONG_MIN) {
+        PyErr_Format(PyExc_ValueError, "Option port not defined");
+        return PyLong_FromLong(-1013);
+    }
+    g_srv.port = (int)port;
+
+    int64_t backlog = get_obj_attr_int(server, "backlog");
+    if (port == LLONG_MIN) {
+        PyErr_Format(PyExc_ValueError, "Option backlog not defined");
+        return PyLong_FromLong(-1014);
+    }
+    g_srv.backlog = (int)backlog;
+
+    rv = get_obj_attr_int(server, "max_content_length");
+    if (rv == LLONG_MIN) {
+        rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");
+    }
     g_srv.max_content_length = (rv >= 0) ? rv : def_max_content_length;
     if (g_srv.max_content_length >= INT_MAX)
         g_srv.max_content_length = INT_MAX - 1;
 
-    rv = get_env_int("FASTWSGI_MAX_CHUNK_SIZE");
+    rv = get_obj_attr_int(server, "max_chunk_size");
+    if (rv == LLONG_MIN) {
+        rv = get_env_int("FASTWSGI_MAX_CHUNK_SIZE");
+    }
     g_srv.max_chunk_size = (rv >= 0) ? (size_t)rv : (size_t)def_max_chunk_size;
     g_srv.max_chunk_size = _min(g_srv.max_chunk_size, MAX_max_chunk_size);
     g_srv.max_chunk_size = _max(g_srv.max_chunk_size, MIN_max_chunk_size);
 
-    rv = get_env_int("FASTWSGI_READ_BUFFER_SIZE");
+    rv = get_obj_attr_int(server, "read_buffer_size");
+    if (rv == LLONG_MIN) {
+        rv = get_env_int("FASTWSGI_READ_BUFFER_SIZE");
+    }
     g_srv.read_buffer_size = (rv >= 0) ? (size_t)rv : (size_t)def_read_buffer_size;
     g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);
     g_srv.read_buffer_size = _max(g_srv.read_buffer_size, MIN_read_buffer_size);
 
-    main();
+    int hr = init_srv();
+    if (hr) {
+        PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
+    }
+    return PyLong_FromLong(hr);
+}
+
+PyObject * run_server(PyObject * self, PyObject * server)
+{
+    if (!g_srv_inited) {
+        PyErr_Format(PyExc_Exception, "server not inited");
+        return PyLong_FromLong(-1);
+    }
+    uv_run(g_srv.loop, UV_RUN_DEFAULT);
+    
+    LOGw("%s: fin", __func__);
+    PyObject * rc = close_server(self, server);
+    Py_DECREF(rc);
+    return PyLong_FromLong(0);
+}
+
+PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server))
+{
+    if (g_srv_inited) {
+        if (g_srv.signal.signal_cb) {
+            uv_signal_stop(&g_srv.signal);
+            g_srv.signal.signal_cb = NULL;
+        }
+        uv_close((uv_handle_t *)&g_srv, NULL);
+        uv_loop_close(g_srv.loop);
+        g_srv_inited = 0;
+        memset(&g_srv, 0, sizeof(g_srv));
+    }
     Py_RETURN_NONE;
 }

@@ -2,7 +2,14 @@
 
 cvar_t g_cv;
 
-void init_constants() {
+static int g_cv_inited = 0;
+
+void init_constants()
+{
+    if (g_cv_inited)
+        return;
+
+    g_cv_inited = 1;
     g_cv.REQUEST_METHOD = PyUnicode_FromString("REQUEST_METHOD");
     g_cv.SCRIPT_NAME = PyUnicode_FromString("SCRIPT_NAME");
     g_cv.SERVER_NAME = PyUnicode_FromString("SERVER_NAME");

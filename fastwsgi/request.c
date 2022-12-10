@@ -227,7 +227,7 @@ int on_header_field_complete(llhttp_t * parser)
     char * data = buf->data;
     ssize_t size = buf->size;
     if (size <= 5) {
-        LOGi("%s: Unnamed field!");        
+        LOGi("%s: Unnamed field!", __func__);        
         goto fin;
     }
     LOGi("%s: %s", __func__, data + 5);
@@ -875,6 +875,9 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
 
 void init_request_dict()
 {
+    if (g_base_dict)
+        return;
+
     char buf[32];
     sprintf(buf, "%d", g_srv.port);
     PyObject * port = PyUnicode_FromString(buf);
