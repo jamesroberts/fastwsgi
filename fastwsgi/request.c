@@ -650,7 +650,7 @@ int build_response(client_t * client, int flags, int status, const void * header
         xbuf_add_str(head, (const char *)headers);
     }
 
-    if (flags & RF_SET_KEEP_ALIVE) {
+    if ((flags & RF_SET_KEEP_ALIVE) != 0 && client->srv->allow_keepalive) {
         xbuf_add_str(head, "Connection: keep-alive\r\n");
     } else {
         xbuf_add_str(head, "Connection: close\r\n");

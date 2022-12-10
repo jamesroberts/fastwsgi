@@ -104,6 +104,7 @@ int x_send_status(client_t * client, int status)
 
 void write_cb(uv_write_t * req, int status)
 {
+    int close_conn = 0;
     write_req_t * wreq = (write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
     if (status != 0) {
@@ -164,10 +165,15 @@ void write_cb(uv_write_t * req, int status)
     return;
 
 fin:
-    uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    if (status < 0 || !client->srv->allow_keepalive) {
+        close_conn = 1;
+    }
+    if (!close_conn) {
+        uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    }
     reset_response_body(client);
     wreq->client = NULL;  // free write_req
-    if (status < 0) {
+    if (close_conn) {
         close_connection(client);
     }
 }
@@ -236,7 +242,10 @@ int send_error(client_t * client, int status, const char* error_string)
         build_response(client, flags, status, NULL, error_string, body_size);
         stream_write(client);
     }
-    return (client->request.keep_alive) ? CA_OK : CA_SHUTDOWN;
+    if (client->request.keep_alive && client->srv->allow_keepalive)
+        return CA_OK;
+    
+    return CA_SHUTDOWN;
 }
 
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
@@ -311,7 +320,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     }
     LOGi("Response created! (len = %d+%lld)", client->head.size, client->response.body_preloaded_size);
     act = stream_write(client);
-    if (!client->request.keep_alive)
+    if (!client->request.keep_alive || !client->srv->allow_keepalive)
         act = CA_SHUTDOWN;
 
 fin:
@@ -554,6 +563,9 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 
     rv = get_obj_attr_int(server, "hook_sigint");
     g_srv.hook_sigint = (rv >= 0) ? (int)rv : 2;
+
+    rv = get_obj_attr_int(server, "allow_keepalive");
+    g_srv.allow_keepalive = (rv == 0) ? 0 : 1;
 
     rv = get_obj_attr_int(server, "max_content_length");
     if (rv == LLONG_MIN) {

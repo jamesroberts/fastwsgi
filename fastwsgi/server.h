@@ -39,6 +39,7 @@ typedef struct {
     int backlog;
     int hook_sigint;   // 0 - ignore SIGINT, 1 - handle SIGINT, 2 - handle SIGINT with halt prog
     uv_signal_t signal;
+    int allow_keepalive;
     size_t read_buffer_size;
     uint64_t max_content_length;
     size_t max_chunk_size;
