@@ -436,7 +436,11 @@ void signal_handler(uv_signal_t * req, int signum)
     if (signum == SIGINT) {
         uv_stop(g_srv.loop);
         uv_signal_stop(req);
-        exit(0);
+        if (g_srv.hook_sigint == 2) {
+            LOGw("%s: halt process", __func__);
+            exit(0);
+        }
+        g_srv.exit_code = 1; // server interrupted by SIGINT
     }
 }
 
@@ -473,17 +477,16 @@ int init_srv()
         hr = -5;
         goto fin;
     }
-
     err = uv_listen((uv_stream_t*)&g_srv.server, g_srv.backlog, connection_cb);
     if (err) {
         LOGe("Listen error %s\n", uv_strerror(err));
         hr = -6;
         goto fin;
+    }    
+    if (g_srv.hook_sigint > 0) {
+        uv_signal_init(g_srv.loop, &g_srv.signal);
+        uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
     }
-    
-    uv_signal_init(g_srv.loop, &g_srv.signal);
-    uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
-
     g_srv_inited = 1;
     hr = 0;
 
@@ -549,6 +552,9 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     }
     g_srv.backlog = (int)backlog;
 
+    rv = get_obj_attr_int(server, "hook_sigint");
+    g_srv.hook_sigint = (rv >= 0) ? (int)rv : 2;
+
     rv = get_obj_attr_int(server, "max_content_length");
     if (rv == LLONG_MIN) {
         rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");
@@ -588,15 +594,17 @@ PyObject * run_server(PyObject * self, PyObject * server)
     }
     uv_run(g_srv.loop, UV_RUN_DEFAULT);
     
-    LOGw("%s: fin", __func__);
+    const char * reason = (g_srv.exit_code == 1) ? "(SIGINT)" : "";
+    LOGn("%s: FIN %s", __func__, reason);
     PyObject * rc = close_server(self, server);
     Py_DECREF(rc);
-    return PyLong_FromLong(0);
+    return PyLong_FromLong(g_srv.exit_code);
 }
 
 PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server))
 {
     if (g_srv_inited) {
+        LOGn("%s", __func__);
         if (g_srv.signal.signal_cb) {
             uv_signal_stop(&g_srv.signal);
             g_srv.signal.signal_cb = NULL;

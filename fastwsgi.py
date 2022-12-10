@@ -23,6 +23,7 @@ class _Server():
         self.port = 5000
         self.backlog = 1024
         self.loglevel = LL_ERROR
+        self.hook_sigint = 2
         self.max_content_length = None  # def value: 999999999
         self.max_chunk_size = None      # def value: 256 KiB
         self.read_buffer_size = None    # def value: 64 KiB
