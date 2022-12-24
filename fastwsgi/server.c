@@ -60,7 +60,10 @@ void close_connection(client_t * client)
 
 void shutdown_cb(uv_shutdown_t * req, int status)
 {
-    uv_close((uv_handle_t*)req->handle, close_cb);
+    uv_handle_t * client = (uv_handle_t *)req->handle;
+    LOGt("%s: status = %d", __func__, status);
+    if (!uv_is_closing(client))
+        uv_close(client, close_cb);
     free(req);
 }
 
