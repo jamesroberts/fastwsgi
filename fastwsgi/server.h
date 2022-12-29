@@ -44,6 +44,10 @@ typedef struct {
     size_t read_buffer_size;
     uint64_t max_content_length;
     size_t max_chunk_size;
+    struct {
+        int mode;          // 0 - disabled, 1 - nowait active, 2 - nowait with wait disconnect all peers
+        int base_handles;  // number of base handles (listen socket + signal)
+    } nowait;
     int exit_code;
 } server_t;
 
@@ -102,6 +106,7 @@ extern server_t g_srv;
 PyObject * init_server(PyObject * self, PyObject * server);
 PyObject * change_setting(PyObject * self, PyObject * args);
 PyObject * run_server(PyObject * self, PyObject * server);
+PyObject * run_nowait(PyObject * self, PyObject * server);
 PyObject * close_server(PyObject * self, PyObject * server);
 
 void free_start_response(client_t * client);

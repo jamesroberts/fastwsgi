@@ -601,6 +601,9 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);
     g_srv.read_buffer_size = _max(g_srv.read_buffer_size, MIN_read_buffer_size);
 
+    rv = get_obj_attr_int(server, "nowait");
+    g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
+
     int hr = init_srv();
     if (hr) {
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
@@ -648,6 +651,46 @@ PyObject * run_server(PyObject * self, PyObject * server)
     PyObject * rc = close_server(self, server);
     Py_DECREF(rc);
     return PyLong_FromLong(g_srv.exit_code);
+}
+
+PyObject * run_nowait(PyObject * self, PyObject * server)
+{
+    int ret_code = 0;
+    if (!g_srv_inited) {
+        PyErr_Format(PyExc_Exception, "server not inited!");
+        return PyLong_FromLong(-1);
+    }
+    if (g_srv.nowait.base_handles == 0) {
+        uv_run(g_srv.loop, UV_RUN_NOWAIT);
+        g_srv.nowait.base_handles = g_srv.loop->active_handles;
+        LOGd("%s: base_handles = %d", __func__, g_srv.nowait.base_handles);
+    }
+    int idle_runs = 0;
+    while (1) {
+        int rc = uv_run(g_srv.loop, UV_RUN_NOWAIT);
+        if (rc != 0) {
+            // https://docs.libuv.org/en/v1.x/loop.html?highlight=uv_run#c.uv_run
+            // more callbacks are expected (meaning you should run the event loop again sometime in the future.
+        }
+        if (g_srv.exit_code != 0) {
+            ret_code = g_srv.exit_code;
+            break;
+        }
+        if (g_srv.nowait.mode == 1) {
+            ret_code = 0;
+            break;
+        }
+        if ((int)g_srv.loop->active_handles > g_srv.nowait.base_handles) {
+            idle_runs = 0;
+            continue;  // clients are still connected
+        }
+        idle_runs++;
+        if (idle_runs >= 2) {
+            ret_code = 0;
+            break;
+        }
+    }
+    return PyLong_FromLong(ret_code);
 }
 
 PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server))

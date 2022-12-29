@@ -28,6 +28,7 @@ class _Server():
         self.max_content_length = None  # def value: 999999999
         self.max_chunk_size = None      # def value: 256 KiB
         self.read_buffer_size = None    # def value: 64 KiB
+        self.nowait = 0
         
     def init(self, app, host = None, port = None, backlog = None, loglevel = None):
         self.app = app
@@ -42,6 +43,8 @@ class _Server():
         _fastwsgi.change_setting(self, "allow_keepalive")
 
     def run(self):
+        if self.nowait:
+            return _fastwsgi.run_nowait(self)
         ret = _fastwsgi.run_server(self)
         self.close()
         return ret
