@@ -601,6 +601,33 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     return PyLong_FromLong(hr);
 }
 
+PyObject * change_setting(PyObject * Py_UNUSED(self), PyObject * args)
+{
+    PyObject * server = NULL;
+    char * name = NULL;
+
+    int rc = PyArg_ParseTuple(args, "Os", &server, &name);
+    if (rc != 1)
+        return PyLong_FromLong(-2);
+
+    if (!server)
+        return PyLong_FromLong(-3);
+
+    if (!name || strlen(name) < 2)
+        return PyLong_FromLong(-4);
+
+    if (strcmp(name, "allow_keepalive") == 0) {
+        int64_t rv = get_obj_attr_int(server, name);
+        if (rv == 0 || rv == 1) {
+            g_srv.allow_keepalive = (int)rv;
+            LOGn("%s: SET allow_keepalive = %d", __func__, g_srv.allow_keepalive);
+            return PyLong_FromLong(0);
+        }
+        return PyLong_FromLong(-5); // unsupported value
+    }
+    return PyLong_FromLong(-1);  // unknown setting
+}
+
 PyObject * run_server(PyObject * self, PyObject * server)
 {
     if (!g_srv_inited) {

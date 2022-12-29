@@ -99,6 +99,7 @@ typedef struct {
 extern server_t g_srv;
 
 PyObject * init_server(PyObject * self, PyObject * server);
+PyObject * change_setting(PyObject * self, PyObject * args);
 PyObject * run_server(PyObject * self, PyObject * server);
 PyObject * close_server(PyObject * self, PyObject * server);
 

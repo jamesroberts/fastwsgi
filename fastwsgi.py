@@ -37,6 +37,10 @@ class _Server():
         self.loglevel = loglevel if loglevel is not None else self.loglevel
         return _fastwsgi.init_server(self)
 
+    def set_allow_keepalive(self, value):
+        self.allow_keepalive = value
+        _fastwsgi.change_setting(self, "allow_keepalive")
+
     def run(self):
         ret = _fastwsgi.run_server(self)
         self.close()
