@@ -34,6 +34,7 @@ typedef struct {
     uv_os_fd_t file_descriptor;
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
+    int ipv6;
     char host[64];
     int port;
     int backlog;

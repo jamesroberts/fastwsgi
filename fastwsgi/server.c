@@ -468,10 +468,16 @@ int init_srv()
     init_constants();
     init_request_dict();
 
-    struct sockaddr_in addr;
-    uv_ip4_addr(g_srv.host, g_srv.port, &addr);
-
-    uv_tcp_init_ex(g_srv.loop, &g_srv.server, AF_INET);
+    sockaddr_t addr;
+    int tcp_flags = 0;
+    if (g_srv.ipv6) {
+        tcp_flags = AF_INET6;
+        uv_ip6_addr(g_srv.host, g_srv.port, &addr.in6);
+    } else {
+        tcp_flags = AF_INET;
+        uv_ip4_addr(g_srv.host, g_srv.port, &addr.in4);
+    }
+    uv_tcp_init_ex(g_srv.loop, &g_srv.server, tcp_flags);
 
     uv_fileno((const uv_handle_t*)&g_srv.server, &g_srv.file_descriptor);
 
@@ -483,7 +489,7 @@ int init_srv()
     uv__socket_sockopt((uv_handle_t*)&g_srv.server, so_reuseport, &enabled);
 #endif
 
-    int err = uv_tcp_bind(&g_srv.server, (const struct sockaddr*)&addr, 0);
+    int err = uv_tcp_bind(&g_srv.server, &addr.addr, 0);
     if (err) {
         LOGe("Bind error %s\n", uv_strerror(err));
         hr = -5;
@@ -549,6 +555,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
         return PyLong_FromLong(-1012);
     }
     strcpy(g_srv.host, host);
+    g_srv.ipv6 = (strchr(host, ':') == NULL) ? 0 : 1;
 
     int64_t port = get_obj_attr_int(server, "port");
     if (port == LLONG_MIN) {
