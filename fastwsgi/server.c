@@ -11,6 +11,7 @@
 #include "constants.h"
 
 server_t g_srv;
+static int g_srv_inited = 0;
 
 void alloc_cb(uv_handle_t * handle, size_t suggested_size, uv_buf_t * buf);
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf);
@@ -59,7 +60,10 @@ void close_connection(client_t * client)
 
 void shutdown_cb(uv_shutdown_t * req, int status)
 {
-    uv_close((uv_handle_t*)req->handle, close_cb);
+    uv_handle_t * client = (uv_handle_t *)req->handle;
+    LOGt("%s: status = %d", __func__, status);
+    if (!uv_is_closing(client))
+        uv_close(client, close_cb);
     free(req);
 }
 
@@ -103,6 +107,7 @@ int x_send_status(client_t * client, int status)
 
 void write_cb(uv_write_t * req, int status)
 {
+    int close_conn = 0;
     write_req_t * wreq = (write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
     if (status != 0) {
@@ -163,10 +168,15 @@ void write_cb(uv_write_t * req, int status)
     return;
 
 fin:
-    uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    if (status < 0 || !client->srv->allow_keepalive) {
+        close_conn = 1;
+    }
+    if (!close_conn) {
+        uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    }
     reset_response_body(client);
     wreq->client = NULL;  // free write_req
-    if (status < 0) {
+    if (close_conn) {
         close_connection(client);
     }
 }
@@ -235,7 +245,10 @@ int send_error(client_t * client, int status, const char* error_string)
         build_response(client, flags, status, NULL, error_string, body_size);
         stream_write(client);
     }
-    return (client->request.keep_alive) ? CA_OK : CA_SHUTDOWN;
+    if (client->request.keep_alive && client->srv->allow_keepalive)
+        return CA_OK;
+    
+    return CA_SHUTDOWN;
 }
 
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
@@ -310,7 +323,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     }
     LOGi("Response created! (len = %d+%lld)", client->head.size, client->response.body_preloaded_size);
     act = stream_write(client);
-    if (!client->request.keep_alive)
+    if (!client->request.keep_alive || !client->srv->allow_keepalive)
         act = CA_SHUTDOWN;
 
 fin:
@@ -435,22 +448,36 @@ void signal_handler(uv_signal_t * req, int signum)
     if (signum == SIGINT) {
         uv_stop(g_srv.loop);
         uv_signal_stop(req);
-        exit(0);
+        if (g_srv.hook_sigint == 2) {
+            LOGw("%s: halt process", __func__);
+            exit(0);
+        }
+        g_srv.exit_code = 1; // server interrupted by SIGINT
     }
 }
 
-int main()
+int init_srv()
 {
+    int hr = -1;
+    if (g_srv_inited)
+        return -1;
+
     g_srv.loop = uv_default_loop();
 
     configure_parser_settings(&g_srv.parser_settings);
     init_constants();
     init_request_dict();
 
-    struct sockaddr_in addr;
-    uv_ip4_addr(g_srv.host, g_srv.port, &addr);
-
-    uv_tcp_init_ex(g_srv.loop, &g_srv.server, AF_INET);
+    sockaddr_t addr;
+    int tcp_flags = 0;
+    if (g_srv.ipv6) {
+        tcp_flags = AF_INET6;
+        uv_ip6_addr(g_srv.host, g_srv.port, &addr.in6);
+    } else {
+        tcp_flags = AF_INET;
+        uv_ip4_addr(g_srv.host, g_srv.port, &addr.in4);
+    }
+    uv_tcp_init_ex(g_srv.loop, &g_srv.server, tcp_flags);
 
     uv_fileno((const uv_handle_t*)&g_srv.server, &g_srv.file_descriptor);
 
@@ -462,51 +489,222 @@ int main()
     uv__socket_sockopt((uv_handle_t*)&g_srv.server, so_reuseport, &enabled);
 #endif
 
-    int err = uv_tcp_bind(&g_srv.server, (const struct sockaddr*)&addr, 0);
+    int err = uv_tcp_bind(&g_srv.server, &addr.addr, 0);
     if (err) {
         LOGe("Bind error %s\n", uv_strerror(err));
-        return 1;
+        hr = -5;
+        goto fin;
     }
-
     err = uv_listen((uv_stream_t*)&g_srv.server, g_srv.backlog, connection_cb);
     if (err) {
         LOGe("Listen error %s\n", uv_strerror(err));
-        return 1;
+        hr = -6;
+        goto fin;
+    }    
+    if (g_srv.hook_sigint > 0) {
+        uv_signal_init(g_srv.loop, &g_srv.signal);
+        uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
     }
+    g_srv_inited = 1;
+    hr = 0;
 
-    uv_signal_t signal;
-    uv_signal_init(g_srv.loop, &signal);
-    uv_signal_start(&signal, signal_handler, SIGINT);
+fin:
+    if (hr) {
+        if (g_srv.signal.signal_cb)
+            uv_signal_stop(&g_srv.signal);
 
-    uv_run(g_srv.loop, UV_RUN_DEFAULT);
-    uv_loop_close(g_srv.loop);
-    free(g_srv.loop);
-    return 0;
+        if (hr <= -5)
+            uv_close((uv_handle_t *)&g_srv, NULL);
+
+        if (g_srv.loop)
+            uv_loop_close(g_srv.loop);
+
+        memset(&g_srv, 0, sizeof(g_srv));
+    }    
+    return hr;
 }
 
-PyObject * run_server(PyObject * self, PyObject * args)
+PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 {
     int64_t rv;
-    memset(&g_srv, 0, sizeof(g_srv));
-    int log_level = 0;
-    PyArg_ParseTuple(args, "Osiii", &g_srv.wsgi_app, &g_srv.host, &g_srv.port, &g_srv.backlog, &log_level);
-    set_log_level(log_level);
 
-    rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");
+    if (g_srv_inited) {
+        PyErr_Format(PyExc_Exception, "server already inited");
+        return PyLong_FromLong(-1000);
+    }
+    memset(&g_srv, 0, sizeof(g_srv));
+    g_srv.pysrv = server;
+
+    int64_t loglevel = get_obj_attr_int(server, "loglevel");
+    if (loglevel == LLONG_MIN) {
+        PyErr_Format(PyExc_ValueError, "Option loglevel not defined");
+        return PyLong_FromLong(-1010);
+    }
+    set_log_level((int)loglevel);
+
+    g_srv.wsgi_app = PyObject_GetAttrString(server, "app");
+    Py_XDECREF(g_srv.wsgi_app);
+    if (!g_srv.wsgi_app) {
+        PyErr_Format(PyExc_ValueError, "Option app not defined");
+        return PyLong_FromLong(-1011);
+    }    
+
+    const char * host = get_obj_attr_str(server, "host");
+    if (!host || strlen(host) >= sizeof(g_srv.host) - 1) {
+        PyErr_Format(PyExc_ValueError, "Option host not defined");
+        return PyLong_FromLong(-1012);
+    }
+    strcpy(g_srv.host, host);
+    g_srv.ipv6 = (strchr(host, ':') == NULL) ? 0 : 1;
+
+    int64_t port = get_obj_attr_int(server, "port");
+    if (port == LLONG_MIN) {
+        PyErr_Format(PyExc_ValueError, "Option port not defined");
+        return PyLong_FromLong(-1013);
+    }
+    g_srv.port = (int)port;
+
+    int64_t backlog = get_obj_attr_int(server, "backlog");
+    if (port == LLONG_MIN) {
+        PyErr_Format(PyExc_ValueError, "Option backlog not defined");
+        return PyLong_FromLong(-1014);
+    }
+    g_srv.backlog = (int)backlog;
+
+    rv = get_obj_attr_int(server, "hook_sigint");
+    g_srv.hook_sigint = (rv >= 0) ? (int)rv : 2;
+
+    rv = get_obj_attr_int(server, "allow_keepalive");
+    g_srv.allow_keepalive = (rv == 0) ? 0 : 1;
+
+    rv = get_obj_attr_int(server, "max_content_length");
+    if (rv == LLONG_MIN) {
+        rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");
+    }
     g_srv.max_content_length = (rv >= 0) ? rv : def_max_content_length;
     if (g_srv.max_content_length >= INT_MAX)
         g_srv.max_content_length = INT_MAX - 1;
 
-    rv = get_env_int("FASTWSGI_MAX_CHUNK_SIZE");
+    rv = get_obj_attr_int(server, "max_chunk_size");
+    if (rv == LLONG_MIN) {
+        rv = get_env_int("FASTWSGI_MAX_CHUNK_SIZE");
+    }
     g_srv.max_chunk_size = (rv >= 0) ? (size_t)rv : (size_t)def_max_chunk_size;
     g_srv.max_chunk_size = _min(g_srv.max_chunk_size, MAX_max_chunk_size);
     g_srv.max_chunk_size = _max(g_srv.max_chunk_size, MIN_max_chunk_size);
 
-    rv = get_env_int("FASTWSGI_READ_BUFFER_SIZE");
+    rv = get_obj_attr_int(server, "read_buffer_size");
+    if (rv == LLONG_MIN) {
+        rv = get_env_int("FASTWSGI_READ_BUFFER_SIZE");
+    }
     g_srv.read_buffer_size = (rv >= 0) ? (size_t)rv : (size_t)def_read_buffer_size;
     g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);
     g_srv.read_buffer_size = _max(g_srv.read_buffer_size, MIN_read_buffer_size);
 
-    main();
+    rv = get_obj_attr_int(server, "nowait");
+    g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
+
+    int hr = init_srv();
+    if (hr) {
+        PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
+    }
+    return PyLong_FromLong(hr);
+}
+
+PyObject * change_setting(PyObject * Py_UNUSED(self), PyObject * args)
+{
+    PyObject * server = NULL;
+    char * name = NULL;
+
+    int rc = PyArg_ParseTuple(args, "Os", &server, &name);
+    if (rc != 1)
+        return PyLong_FromLong(-2);
+
+    if (!server)
+        return PyLong_FromLong(-3);
+
+    if (!name || strlen(name) < 2)
+        return PyLong_FromLong(-4);
+
+    if (strcmp(name, "allow_keepalive") == 0) {
+        int64_t rv = get_obj_attr_int(server, name);
+        if (rv == 0 || rv == 1) {
+            g_srv.allow_keepalive = (int)rv;
+            LOGn("%s: SET allow_keepalive = %d", __func__, g_srv.allow_keepalive);
+            return PyLong_FromLong(0);
+        }
+        return PyLong_FromLong(-5); // unsupported value
+    }
+    return PyLong_FromLong(-1);  // unknown setting
+}
+
+PyObject * run_server(PyObject * self, PyObject * server)
+{
+    if (!g_srv_inited) {
+        PyErr_Format(PyExc_Exception, "server not inited");
+        return PyLong_FromLong(-1);
+    }
+    uv_run(g_srv.loop, UV_RUN_DEFAULT);
+    
+    const char * reason = (g_srv.exit_code == 1) ? "(SIGINT)" : "";
+    LOGn("%s: FIN %s", __func__, reason);
+    PyObject * rc = close_server(self, server);
+    Py_DECREF(rc);
+    return PyLong_FromLong(g_srv.exit_code);
+}
+
+PyObject * run_nowait(PyObject * self, PyObject * server)
+{
+    int ret_code = 0;
+    if (!g_srv_inited) {
+        PyErr_Format(PyExc_Exception, "server not inited!");
+        return PyLong_FromLong(-1);
+    }
+    if (g_srv.nowait.base_handles == 0) {
+        uv_run(g_srv.loop, UV_RUN_NOWAIT);
+        g_srv.nowait.base_handles = g_srv.loop->active_handles;
+        LOGd("%s: base_handles = %d", __func__, g_srv.nowait.base_handles);
+    }
+    int idle_runs = 0;
+    while (1) {
+        int rc = uv_run(g_srv.loop, UV_RUN_NOWAIT);
+        if (rc != 0) {
+            // https://docs.libuv.org/en/v1.x/loop.html?highlight=uv_run#c.uv_run
+            // more callbacks are expected (meaning you should run the event loop again sometime in the future.
+        }
+        if (g_srv.exit_code != 0) {
+            ret_code = g_srv.exit_code;
+            break;
+        }
+        if (g_srv.nowait.mode == 1) {
+            ret_code = 0;
+            break;
+        }
+        if ((int)g_srv.loop->active_handles > g_srv.nowait.base_handles) {
+            idle_runs = 0;
+            continue;  // clients are still connected
+        }
+        idle_runs++;
+        if (idle_runs >= 2) {
+            ret_code = 0;
+            break;
+        }
+    }
+    return PyLong_FromLong(ret_code);
+}
+
+PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server))
+{
+    if (g_srv_inited) {
+        LOGn("%s", __func__);
+        if (g_srv.signal.signal_cb) {
+            uv_signal_stop(&g_srv.signal);
+            g_srv.signal.signal_cb = NULL;
+        }
+        uv_close((uv_handle_t *)&g_srv, NULL);
+        uv_loop_close(g_srv.loop);
+        g_srv_inited = 0;
+        memset(&g_srv, 0, sizeof(g_srv));
+    }
     Py_RETURN_NONE;
 }

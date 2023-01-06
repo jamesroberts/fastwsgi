@@ -29,16 +29,26 @@ typedef struct {
 
 typedef struct {
     uv_tcp_t server;  // Placement strictly at the beginning of the structure!
+    PyObject * pysrv; // object fastwsgi.py@_Server
     uv_loop_t* loop;
     uv_os_fd_t file_descriptor;
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
-    char* host;
+    int ipv6;
+    char host[64];
     int port;
     int backlog;
+    int hook_sigint;   // 0 - ignore SIGINT, 1 - handle SIGINT, 2 - handle SIGINT with halt prog
+    uv_signal_t signal;
+    int allow_keepalive;
     size_t read_buffer_size;
     uint64_t max_content_length;
     size_t max_chunk_size;
+    struct {
+        int mode;          // 0 - disabled, 1 - nowait active, 2 - nowait with wait disconnect all peers
+        int base_handles;  // number of base handles (listen socket + signal)
+    } nowait;
+    int exit_code;
 } server_t;
 
 typedef enum {
@@ -93,7 +103,11 @@ typedef struct {
 
 extern server_t g_srv;
 
-PyObject* run_server(PyObject* self, PyObject* args);
+PyObject * init_server(PyObject * self, PyObject * server);
+PyObject * change_setting(PyObject * self, PyObject * args);
+PyObject * run_server(PyObject * self, PyObject * server);
+PyObject * run_nowait(PyObject * self, PyObject * server);
+PyObject * close_server(PyObject * self, PyObject * server);
 
 void free_start_response(client_t * client);
 void reset_response_preload(client_t * client);

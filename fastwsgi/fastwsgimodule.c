@@ -2,8 +2,12 @@
 #include "server.h"
 
 static PyMethodDef FastWsgiFunctions[] = {
-    {"run_server", run_server, METH_VARARGS, ""},
-    {NULL, NULL, 0, NULL}
+    { "init_server", init_server, METH_O, "" },
+    { "change_setting", change_setting, METH_VARARGS, "" },
+    { "run_server", run_server, METH_O, "" },
+    { "run_nowait", run_nowait, METH_O, "" },
+    { "close_server", close_server, METH_O, "" },
+    { NULL, NULL, 0, NULL}
 };
 
 static struct PyModuleDef module = {

@@ -44,3 +44,22 @@ int64_t get_env_int(const char * name)
     return v;
 }
 
+int64_t get_obj_attr_int(PyObject * obj, const char * name)
+{
+    PyObject * attr = PyObject_GetAttrString(obj, name);
+    Py_XDECREF(attr);
+    if (!attr || !PyLong_CheckExact(attr)) {
+        return LLONG_MIN;
+    }    
+    return PyLong_AsSsize_t(attr);
+}
+
+const char * get_obj_attr_str(PyObject * obj, const char * name)
+{
+    PyObject * attr = PyObject_GetAttrString(obj, name);
+    Py_XDECREF(attr);
+    if (!attr || !PyUnicode_CheckExact(attr)) {
+        return NULL;
+    }
+    return PyUnicode_AsUTF8(attr);
+}
