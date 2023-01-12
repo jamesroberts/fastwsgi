@@ -172,7 +172,10 @@ void write_cb(uv_write_t * req, int status)
     return;
 
 fin:
-    if (status < 0 || !client->srv->allow_keepalive) {
+    if (status < 0) {
+        close_conn = 1;
+    }
+    if (!client->request.keep_alive || !client->srv->allow_keepalive) {
         close_conn = 1;
     }
     if (!close_conn) {
@@ -328,8 +331,6 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     }
     LOGi("Response created! (len = %d+%lld)", client->head.size, client->response.body_preloaded_size);
     act = stream_write(client);
-    if (!client->request.keep_alive || !client->srv->allow_keepalive)
-        act = CA_SHUTDOWN;
 
 fin:
     if (buf->base)
