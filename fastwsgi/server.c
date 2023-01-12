@@ -40,8 +40,9 @@ typedef enum {
 
 void close_cb(uv_handle_t * handle)
 {
-    LOGn("disconnected =================================");
     client_t * client = (client_t *)handle;
+    update_log_prefix(client);
+    LOGn("disconnected =================================");
     Py_XDECREF(client->request.headers);
     Py_XDECREF(client->request.wsgi_input_empty);
     Py_XDECREF(client->request.wsgi_input);
@@ -50,6 +51,7 @@ void close_cb(uv_handle_t * handle)
     reset_response_body(client);
     free_read_buffer(client, NULL);
     free(client);
+    update_log_prefix(NULL);
 }
 
 void close_connection(client_t * client)
@@ -61,6 +63,7 @@ void close_connection(client_t * client)
 void shutdown_cb(uv_shutdown_t * req, int status)
 {
     uv_handle_t * client = (uv_handle_t *)req->handle;
+    update_log_prefix(client);
     LOGt("%s: status = %d", __func__, status);
     if (!uv_is_closing(client))
         uv_close(client, close_cb);
@@ -110,6 +113,7 @@ void write_cb(uv_write_t * req, int status)
     int close_conn = 0;
     write_req_t * wreq = (write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
+    update_log_prefix(client);
     if (status != 0) {
         LOGe("%s: Write error: %s", __func__, uv_strerror(status));
         goto fin;
@@ -257,6 +261,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     int act = CA_OK;
     client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
+    update_log_prefix(client);
 
     if (nread == 0) {
         LOGd("read_cb: nread = 0");
@@ -359,9 +364,10 @@ fin:
 
 void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 {
+    client_t * client = (client_t *)handle;
+    update_log_prefix(client);
     const int read_buffer_size = (int)g_srv.read_buffer_size;
     LOGt("%s: size = %d (suggested = %d)", __func__, read_buffer_size, (int)suggested_size);
-    client_t * client = (client_t *)handle;
     buf->base = NULL;
     buf->len = 0;
 
@@ -407,11 +413,12 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 
 void connection_cb(uv_stream_t * server, int status)
 {
+    update_log_prefix(NULL);
     if (status < 0) {
         LOGe("Connection error %s\n", uv_strerror(status));
         return;
     }
-    LOGn("new connection =================================");
+    LOGi("new connection =================================");
     client_t* client = calloc(1, sizeof(client_t) + g_srv.read_buffer_size + 8);
     client->srv = &g_srv;
 
@@ -432,12 +439,19 @@ void connection_cb(uv_stream_t * server, int status)
     rc = uv_tcp_getpeername((uv_tcp_t*)&client->handle, &sock_addr.addr, &sock_len);
     LOGw_IF(rc, "%s: cannot get remote addr (err = %d)", __func__, rc);
     if (rc == 0) {
-        rc = uv_ip_name(&sock_addr.addr, client->remote_addr, sizeof(client->remote_addr));
+        char ip[48];
+        rc = uv_ip_name(&sock_addr.addr, ip, sizeof(ip));
         LOGw_IF(rc, "%s: cannot get remote IP-addr (err = %d)", __func__, rc);
         if (rc)
-            client->remote_addr[0] = 0;
-        LOGn_IF(rc == 0, "remote IP-addr: %s", client->remote_addr);
+            ip[0] = 0;
+        if (sock_addr.addr.sa_family == AF_INET6) {
+            sprintf(client->remote_addr, "[%s]:%d", ip, (int)sock_addr.in6.sin6_port);
+        } else {
+            sprintf(client->remote_addr, "%s:%d", ip, (int)sock_addr.in4.sin_port);
+        }
     }
+    update_log_prefix(client);
+    LOGn("connected =================================");
     llhttp_init(&client->request.parser, HTTP_REQUEST, &g_srv.parser_settings);
     client->request.parser.data = client;
     uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
@@ -449,6 +463,7 @@ void signal_handler(uv_signal_t * req, int signum)
         uv_stop(g_srv.loop);
         uv_signal_stop(req);
         if (g_srv.hook_sigint == 2) {
+            update_log_prefix(NULL);
             LOGw("%s: halt process", __func__);
             exit(0);
         }
@@ -528,6 +543,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 {
     int64_t rv;
 
+    update_log_prefix(NULL);
     if (g_srv_inited) {
         PyErr_Format(PyExc_Exception, "server already inited");
         return PyLong_FromLong(-1000);
@@ -565,7 +581,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     g_srv.port = (int)port;
 
     int64_t backlog = get_obj_attr_int(server, "backlog");
-    if (port == LLONG_MIN) {
+    if (backlog == LLONG_MIN) {
         PyErr_Format(PyExc_ValueError, "Option backlog not defined");
         return PyLong_FromLong(-1014);
     }
@@ -696,6 +712,7 @@ PyObject * run_nowait(PyObject * self, PyObject * server)
 PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server))
 {
     if (g_srv_inited) {
+        update_log_prefix(NULL);
         LOGn("%s", __func__);
         if (g_srv.signal.signal_cb) {
             uv_signal_stop(&g_srv.signal);

@@ -33,6 +33,15 @@ void set_log_level(int level)
 }
 
 static const char log_prefix[] = "[FWSGI-X]";
+static const int log_level_pos = 7;
+static const char * log_client_addr = NULL;
+static int log_client_addr_len = 0;
+
+void set_log_client_addr(const char * addr)
+{
+    log_client_addr = addr;
+    log_client_addr_len = addr ? strlen(addr) : 0;
+}
 
 void logmsg(int level, const char * fmt, ...)
 {
@@ -40,10 +49,18 @@ void logmsg(int level, const char * fmt, ...)
     if (level <= g_log_level) {
         va_list argptr;
         va_start(argptr, fmt);
-        const int prefix_len = sizeof(log_prefix);     // include space
-        memcpy(buf, log_prefix, prefix_len);           // add prefix
-        buf[prefix_len - 3] = g_log_level_str[level];  // replace X to error type
-        buf[prefix_len - 1] = 0x20;                    // add space delimiter
+        const int log_prefix_size = sizeof(log_prefix) - 1;
+        memcpy(buf, log_prefix, log_prefix_size);
+        buf[log_level_pos] = g_log_level_str[level];  // replace X to error type
+        buf[log_prefix_size] = 0x20;  // add space delimiter
+        int prefix_len = log_prefix_size + 1;
+        if (log_client_addr) {
+            buf[prefix_len++] = '(';
+            memcpy(buf + prefix_len, log_client_addr, log_client_addr_len);
+            prefix_len += log_client_addr_len;
+            buf[prefix_len++] = ')';
+            buf[prefix_len++] = 0x20;  // add space delimiter
+        }
         int maxlen = sizeof(buf) - prefix_len - 8;
         int len = vsnprintf(buf + prefix_len, maxlen, fmt, argptr);
         va_end(argptr);
