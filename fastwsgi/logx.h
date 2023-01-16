@@ -30,6 +30,7 @@ typedef enum {
 
 extern int g_log_level;
 void set_log_level(int level);
+void set_log_client_addr(const char * addr);
 void logmsg(int level, const char * fmt, ...);
 
 #define LOGMSG(_level_, ...) if (_level_ <= g_log_level) logmsg(_level_, __VA_ARGS__)

@@ -64,7 +64,7 @@ typedef enum {
 typedef struct {
     uv_tcp_t handle;     // peer connection. Placement strictly at the beginning of the structure! 
     server_t * srv;
-    char remote_addr[48];
+    char remote_addr[64];
     xbuf_t rbuf[2];      // buffers for reading from socket
     struct {
         int load_state;
@@ -128,5 +128,10 @@ typedef enum {
 int build_response(client_t * client, int flags, int status, const void * headers, const void * body, int body_size);
 PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr);
 
+inline void update_log_prefix(void * _client)
+{
+    client_t * client = (client_t *)_client;
+    set_log_client_addr(client ? client->remote_addr : NULL);
+}
 
 #endif
