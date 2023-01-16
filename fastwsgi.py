@@ -87,7 +87,15 @@ def import_from_string(import_str):
         raise ImportError("Import string should be in the format <module>:<attribute>")
 
     try:
-        module = importlib.import_module(module_str)
+        relpath = f"{module_str}.py"
+        if os.path.isfile(relpath):
+            spec = importlib.util.spec_from_file_location(module_str, relpath)
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+
+        else:
+            module = importlib.import_module(module_str)
+
         for attr_str in attrs_str.split("."):
             module = getattr(module, attr_str)
     except AttributeError:
