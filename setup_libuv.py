@@ -124,5 +124,6 @@ class build_libuv(build_ext):
             self.compiler.add_library('user32')
             self.compiler.add_library('userenv')
             self.compiler.add_library('ws2_32')
+            self.compiler.add_library('secur32')
 
         build_ext.build_extensions(self)
