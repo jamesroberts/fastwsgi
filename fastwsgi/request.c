@@ -592,6 +592,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     PyObject** body = client->response.body;
     StartResponse * response = NULL;
     int64_t body_size = _body_size;
+    int resp_date_present = 0;
 
     if (flags & RF_HEADERS_PYLIST) {
         response = (StartResponse *)headers;
@@ -635,6 +636,10 @@ int build_response(client_t * client, int flags, int status, const void * header
                 if (strcasecmp(key, "Connection") == 0)
                     continue;  // skip "Connection" header
 
+            if (key_len == 4)
+                if (strcasecmp(key, "Date") == 0)
+                    resp_date_present = 1;
+
             size_t value_len = 0;
             const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
@@ -648,6 +653,14 @@ int build_response(client_t * client, int flags, int status, const void * header
     }
     else if (headers) {
         xbuf_add_str(head, (const char *)headers);
+    }
+
+    if (!resp_date_present) {
+        char * date_str;
+        int date_len = get_asctime(&date_str);
+        xbuf_add(head, "Date: ", 6);
+        xbuf_add(head, date_str, date_len);
+        xbuf_add(head, "\r\n", 2);
     }
 
     if ((flags & RF_SET_KEEP_ALIVE) != 0 && client->srv->allow_keepalive) {

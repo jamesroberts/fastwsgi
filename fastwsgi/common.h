@@ -54,4 +54,6 @@ const char * get_http_status_name(int status);
 int64_t get_obj_attr_int(PyObject * obj, const char * name);
 const char * get_obj_attr_str(PyObject * obj, const char * name);
 
+int get_asctime(char ** asc_time);
+
 #endif
