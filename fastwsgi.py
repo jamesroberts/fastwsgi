@@ -29,13 +29,17 @@ class _Server():
         self.max_chunk_size = None      # def value: 256 KiB
         self.read_buffer_size = None    # def value: 64 KiB
         self.nowait = 0
+        self.num_workers = 1
+        self.worker_list = [ ]
         
-    def init(self, app, host = None, port = None, backlog = None, loglevel = None):
+    def init(self, app, host = None, port = None, loglevel = None, workers = None):
         self.app = app
         self.host = host if host else self.host
         self.port = port if port else self.port
-        self.backlog = backlog if backlog else self.backlog
         self.loglevel = loglevel if loglevel is not None else self.loglevel
+        self.num_workers = workers if workers is not None else self.num_workers
+        if self.num_workers > 1:
+            return 0
         return _fastwsgi.init_server(self)
 
     def set_allow_keepalive(self, value):
@@ -44,7 +48,11 @@ class _Server():
 
     def run(self):
         if self.nowait:
+            if self.num_workers > 1:
+                raise Exception('Incorrect server options')
             return _fastwsgi.run_nowait(self)
+        if self.num_workers > 1:
+            return self.multi_run()
         ret = _fastwsgi.run_server(self)
         self.close()
         return ret
@@ -52,34 +60,33 @@ class _Server():
     def close(self):
         return _fastwsgi.close_server(self)
 
+    def multi_run(self, num_workers = None):
+        if num_workers is not None:
+            self.num_workers = num_workers
+        for _ in range(self.num_workers):
+            pid = os.fork()
+            if pid > 0:
+                self.worker_list.append(pid)
+                print(f"Worker process added with PID: {pid}")
+                continue
+            try:
+                _fastwsgi.init_server(self)
+                _fastwsgi.run_server(self)
+            except KeyboardInterrupt:
+                pass
+            sys.exit(0)
+        try:
+            for _ in range(self.num_workers):
+                os.wait()
+        except KeyboardInterrupt:
+            print("\n" + "Stopping all workers")
+            for worker in self.worker_list:
+                os.kill(worker, signal.SIGINT)
+        return 0
+
 server = _Server()
 
 # -------------------------------------------------------------------------------------
-
-NUM_WORKERS = 4
-
-def run_multi_process_server(app):
-    workers = []
-    for _ in range(NUM_WORKERS):
-        pid = os.fork()
-        if pid > 0:
-            workers.append(pid)
-            print(f"Worker process added with PID: {pid}")
-        else:
-            try:
-                server.init(app)
-                server.run()
-            except KeyboardInterrupt:
-                sys.exit(0)
-
-    try:
-        for _ in range(NUM_WORKERS):
-            os.wait()
-    except KeyboardInterrupt:
-        print("\nStopping all workers")
-        for worker in workers:
-            os.kill(worker, signal.SIGINT)
-
 
 def import_from_string(import_str):
     module_str, _, attrs_str = import_str.partition(":")
@@ -103,12 +110,6 @@ def import_from_string(import_str):
 
     return module
 
-
-def print_server_details(host, port):
-    print(f"\n==== FastWSGI ==== ")
-    print(f"Host: {host}\nPort: {port}")
-    print("==================\n")
-
 # -------------------------------------------------------------------------------------
 
 @click.command()
@@ -131,17 +132,15 @@ def run_from_cli(host, port, wsgi_app_import_string, loglevel):
         print(f"Error importing WSGI app: {e}")
         sys.exit(1)
 
-    print_server_details(host, port)
-    server.init(wsgi_app, host, port, loglevel = loglevel)
-    print(f"Server listening at http://{host}:{port}")
+    server.init(wsgi_app, host, port, loglevel)
+    print(f"FastWSGI server listening at http://{server.host}:{server.port}")
     server.run()
 
 # -------------------------------------------------------------------------------------
 
-def run(wsgi_app, host = server.host, port = server.port, backlog = server.backlog, loglevel = server.loglevel):
-    print_server_details(host, port)
-    print(f"Running on PID:", os.getpid())
-    server.init(wsgi_app, host, port, backlog, loglevel)
-    print(f"Server listening at http://{host}:{port}")
-    server.run()    
-    # run_multi_process_server(wsgi_app)
+def run(wsgi_app, host = None, port = None, loglevel = None, workers = None):
+    print("FastWSGI server running on PID:", os.getpid())
+    server.init(wsgi_app, host, port, loglevel, workers)
+    addon = " multiple workers" if server.num_workers > 1 else ""
+    print(f"FastWSGI server{addon} listening at http://{server.host}:{server.port}")
+    server.run()
