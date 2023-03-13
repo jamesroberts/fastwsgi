@@ -523,7 +523,31 @@ int process_wsgi_response(client_t * client)
     if (PyBytes_CheckExact(wsgi_body)) {
         LOGd("wsgi_body: is PyBytes (size = %d)", (int)PyBytes_GET_SIZE(wsgi_body));
     } else {
-        if (PyIter_Check(wsgi_body)) {
+        if (PyGen_Check(wsgi_body)) {
+            LOGd("wsgi_body: is GENERATOR '%s'", body_type);
+            /*
+            * If the application we called was a generator, we have to call .next() on
+            * it before we do anything else because that may execute code that
+            * invokes `start_response` (which might not have been invoked yet).
+            * Think of the following scenario:
+            *
+            *     def app(environ, start_response):
+            *         start_response('200 Ok', ...)
+            *         yield 'Hello World'
+            */
+            client->response.body_iterator = wsgi_body;
+            PyObject * item = wsgi_iterator_get_next_chunk(client, 1);
+            if (!item && client->error) {
+                err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+                goto fin;
+            }                
+            Py_ssize_t size = (item == NULL) ? 0 : PyBytes_GET_SIZE(item);
+            client->response.body[0] = item;
+            client->response.body_chunk_num = (item == NULL) ? 0 : 1;
+            client->response.body_total_size = -111;  // generator
+            client->response.body_preloaded_size = size;
+        }
+        else if (PyIter_Check(wsgi_body)) {
             LOGd("wsgi_body: is ITERATOR '%s'", body_type);
             client->response.body_iterator = wsgi_body;
         } else {
@@ -753,6 +777,22 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr)
 {
     if (client->response.body_iterator == NULL)
         return NULL;
+
+    if (client->response.body_total_size == -111) {  // generator
+        client->response.body_total_size = 0;
+        int64_t size = client->response.body_preloaded_size;
+        client->response.body_preloaded_size = 0;
+        if (client->response.body_chunk_num > 0) {
+            client->response.body_chunk_num = 0;
+            PyObject * item = client->response.body[0];
+            if (item && size == 0) {
+                Py_DECREF(item); // skip empty items
+                return NULL;
+            }
+            return item;
+        }
+        return NULL;
+    }
     PyObject* item;
     while (item = PyIter_Next(client->response.body_iterator)) {
         if (!PyBytes_Check(item)) {
