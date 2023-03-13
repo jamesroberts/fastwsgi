@@ -491,8 +491,7 @@ int call_wsgi_app(client_t * client)
 {
     PyObject * headers = client->request.headers;
     
-    StartResponse * start_response = PyObject_NEW(StartResponse, &StartResponse_Type);
-    start_response->called = 0;
+    StartResponse * start_response = create_start_response();
     client->start_response = start_response;
 
     LOGi("calling wsgi application...");
