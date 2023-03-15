@@ -13,9 +13,20 @@ typedef struct {
 
 extern PyTypeObject StartResponse_Type;
 
+INLINE
+static StartResponse * create_start_response(void)
+{
+    StartResponse * response = PyObject_NEW(StartResponse, &StartResponse_Type);
+    response->status = NULL;
+    response->headers = NULL;
+    response->exc_info = NULL;
+    response->called = 0;
+    return response;
+}
+
 void set_status_error();
 void set_header_tuple_error();
 void set_header_list_error(PyObject* headers);
-void exc_info_error(PyObject* exc_info);
+void set_exc_info_type_error(PyObject* exc_info);
 
 #endif
