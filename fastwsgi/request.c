@@ -455,7 +455,7 @@ int on_message_complete(llhttp_t * parser)
         client->request.wsgi_input_size = 0;
         if (client->request.wsgi_input_empty == NULL) {
             wsgi_input = PyObject_CallMethodObjArgs(g_cv.module_io, g_cv.BytesIO, NULL);
-            client->request.wsgi_input = wsgi_input;  // object cached
+            client->request.wsgi_input_empty = wsgi_input;  // object cached
         } else { 
             wsgi_input = client->request.wsgi_input_empty;
         }
