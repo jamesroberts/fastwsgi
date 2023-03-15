@@ -11,10 +11,17 @@ raw_requests = [
 ]
 
 
+def remove_date_header(response: bytes):
+    start_index = response.find(b"Date:")
+    delimiter = b"\r\n"
+    end_index = response.find(delimiter, start_index) + len(delimiter)
+    return response[:start_index] + response[end_index:]
+
+
 @pytest.mark.parametrize("raw_request", raw_requests)
 def test_bad_requests(basic_test_server, raw_request):
     host, port = basic_test_server.host, basic_test_server.port
     connection = socket.create_connection((host, port))
     connection.send(raw_request.encode())
     data = connection.recv(4096)
-    assert data == BAD_REQUEST_RESPONSE
+    assert remove_date_header(data) == BAD_REQUEST_RESPONSE
