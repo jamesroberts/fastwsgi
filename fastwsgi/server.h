@@ -44,6 +44,10 @@ typedef struct {
     size_t read_buffer_size;
     uint64_t max_content_length;
     size_t max_chunk_size;
+    int tcp_nodelay;       // 0 = Nagle's algo enabled; 1 = Nagle's algo disabled;
+    int tcp_keepalive;     // negative = disabled; 0 = system default; 1...N = timeout in seconds
+    int tcp_send_buf_size; // 0 = system default; 1...N = size in bytes
+    int tcp_recv_buf_size; // 0 = system default; 1...N = size in bytes
     struct {
         int mode;          // 0 - disabled, 1 - nowait active, 2 - nowait with wait disconnect all peers
         int base_handles;  // number of base handles (listen socket + signal)

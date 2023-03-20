@@ -433,8 +433,20 @@ void connection_cb(uv_stream_t * server, int status)
     client->srv = &g_srv;
 
     uv_tcp_init(g_srv.loop, &client->handle);
-    uv_tcp_nodelay(&client->handle, 0);
-    uv_tcp_keepalive(&client->handle, 1, 60);
+    
+    uv_tcp_nodelay(&client->handle, (g_srv.tcp_nodelay > 0) ? 1 : 0);
+    
+    if (g_srv.tcp_keepalive < 0)
+        uv_tcp_keepalive(&client->handle, 0, 60);  // disable
+
+    if (g_srv.tcp_keepalive >= 1)
+        uv_tcp_keepalive(&client->handle, 1, g_srv.tcp_keepalive);  // enable and set timeout
+
+    if (g_srv.tcp_send_buf_size > 0) 
+        uv_send_buffer_size((uv_handle_t *)client, &g_srv.tcp_send_buf_size);
+
+    if (g_srv.tcp_recv_buf_size > 0) 
+        uv_recv_buffer_size((uv_handle_t *)client, &g_srv.tcp_recv_buf_size);
 
     client->handle.data = client;
 
@@ -626,6 +638,18 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     g_srv.read_buffer_size = (rv >= 0) ? (size_t)rv : (size_t)def_read_buffer_size;
     g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);
     g_srv.read_buffer_size = _max(g_srv.read_buffer_size, MIN_read_buffer_size);
+
+    rv = get_obj_attr_int(server, "tcp_nodelay");
+    g_srv.tcp_nodelay = (rv >= 0) ? (int)rv : 0;
+
+    rv = get_obj_attr_int(server, "tcp_keepalive");
+    g_srv.tcp_keepalive = (rv >= -1) ? (int)rv : 0;
+
+    rv = get_obj_attr_int(server, "tcp_send_buf_size");
+    g_srv.tcp_send_buf_size = (rv >= 0) ? (int)rv : 0;
+
+    rv = get_obj_attr_int(server, "tcp_recv_buf_size");
+    g_srv.tcp_recv_buf_size = (rv >= 0) ? (int)rv : 0;
 
     rv = get_obj_attr_int(server, "nowait");
     g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
