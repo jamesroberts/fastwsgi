@@ -72,12 +72,15 @@ void shutdown_cb(uv_shutdown_t * req, int status)
 
 void shutdown_connection(client_t * client)
 {
-    uv_shutdown_t* shutdown = malloc(sizeof(uv_shutdown_t));
-    if (shutdown) {
-        int rc = uv_shutdown(shutdown, (uv_stream_t *)client, shutdown_cb);
-        if (rc == 0)
-            return;
-        free(shutdown); // uv_shutdown returned UV_ENOTCONN
+    bool enotconn = is_stream_notconn((uv_stream_t *)client);
+    if (!enotconn) {
+        uv_shutdown_t* shutdown = malloc(sizeof(uv_shutdown_t));
+        if (shutdown) {
+            int rc = uv_shutdown(shutdown, (uv_stream_t *)client, shutdown_cb);
+            if (rc == 0)
+                return;
+            free(shutdown); // uv_shutdown returned UV_ENOTCONN
+        }
     }
     close_connection(client);
 }
