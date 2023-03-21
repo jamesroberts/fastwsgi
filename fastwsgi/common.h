@@ -4,6 +4,7 @@
 #include <Python.h>
 #include "uv.h"
 #include "uv-common.h"
+#include <stdbool.h>
 
 #if defined(_MSC_VER)
 #define vsnprintf _vsnprintf
@@ -55,5 +56,16 @@ int64_t get_obj_attr_int(PyObject * obj, const char * name);
 const char * get_obj_attr_str(PyObject * obj, const char * name);
 
 int get_asctime(char ** asc_time);
+
+INLINE
+bool is_stream_notconn(uv_stream_t * handle)
+{
+    if (!(handle->flags & UV_HANDLE_WRITABLE) ||
+        handle->flags & UV_HANDLE_SHUTTING ||
+        uv__is_closing(handle)) {
+        return true;
+    }
+    return false;
+}
 
 #endif

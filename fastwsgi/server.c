@@ -13,9 +13,15 @@
 server_t g_srv;
 static int g_srv_inited = 0;
 
+#define MAGIC_CLIENT ((void *)0xFFAB4321)
+
 void alloc_cb(uv_handle_t * handle, size_t suggested_size, uv_buf_t * buf);
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf);
 int stream_write(client_t * client);
+
+void idle_worker_cb(uv_idle_t * handle);
+void pipeline_cb(uv_handle_t * handle, void * arg);
+int pipeline_close(client_t * client, bool start_reading);
 
 void free_read_buffer(client_t * client, void * data)
 {
@@ -43,6 +49,7 @@ void close_cb(uv_handle_t * handle)
     client_t * client = (client_t *)handle;
     update_log_prefix(client);
     LOGn("disconnected =================================");
+    pipeline_close(client, false);
     Py_XDECREF(client->request.headers);
     Py_XDECREF(client->request.wsgi_input_empty);
     Py_XDECREF(client->request.wsgi_input);
@@ -72,12 +79,15 @@ void shutdown_cb(uv_shutdown_t * req, int status)
 
 void shutdown_connection(client_t * client)
 {
-    uv_shutdown_t* shutdown = malloc(sizeof(uv_shutdown_t));
-    if (shutdown) {
-        int rc = uv_shutdown(shutdown, (uv_stream_t *)client, shutdown_cb);
-        if (rc == 0)
-            return;
-        free(shutdown); // uv_shutdown returned UV_ENOTCONN
+    bool enotconn = is_stream_notconn((uv_stream_t *)client);
+    if (!enotconn) {
+        uv_shutdown_t* shutdown = malloc(sizeof(uv_shutdown_t));
+        if (shutdown) {
+            int rc = uv_shutdown(shutdown, (uv_stream_t *)client, shutdown_cb);
+            if (rc == 0)
+                return;
+            free(shutdown); // uv_shutdown returned UV_ENOTCONN
+        }
     }
     close_connection(client);
 }
@@ -185,10 +195,12 @@ fin:
         close_conn = 1;
     }
     if (!close_conn) {
-        uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+        reset_response_body(client);
+        wreq->client = NULL;  // free write_req
+        if (client->pipeline.status == PS_RESTING) {
+            uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+        }
     }
-    reset_response_body(client);
-    wreq->client = NULL;  // free write_req
     if (close_conn) {
         close_connection(client);
     }
@@ -264,6 +276,60 @@ int send_error(client_t * client, int status, const char* error_string)
     return CA_SHUTDOWN;
 }
 
+int pipeline_close(client_t * client, bool start_reading)
+{
+    if (client->pipeline.buf_base) {
+        free_read_buffer(client, client->pipeline.buf_base);
+        client->pipeline.buf_base = NULL;
+    }
+    client->pipeline.buf_pos = NULL;
+    if (client->pipeline.status == PS_RESTING)
+        return -1;  // pipeline already closed
+
+    g_srv.num_pipeline--;
+    if (g_srv.num_pipeline == 0) {
+        uv_idle_stop(&g_srv.worker);
+    }
+    LOGi("%s: --------- %s", __func__, (g_srv.num_pipeline == 0) ? "LAST" : "");
+    client->pipeline.status = PS_RESTING;
+    if (start_reading) {
+        uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    }
+    return 0;
+}
+
+void idle_worker_cb(uv_idle_t * handle)
+{
+    if (g_srv.num_pipeline == 0)
+        return;
+
+    uv_walk(g_srv.loop, pipeline_cb, NULL);
+}
+
+void pipeline_cb(uv_handle_t * handle, void * arg)
+{
+    if (handle->data != MAGIC_CLIENT)
+        return;
+
+    client_t * client = (client_t *)handle;
+    if (client->response.write_req.client) {
+        // do not call read_cb until active write
+        return;
+    }
+    update_log_prefix(client);
+    if (client->pipeline.status == PS_RESTING) {
+        return;
+    }
+    llhttp_resume(&client->request.parser);
+    ssize_t nread = (size_t)client->pipeline.buf_end - (size_t)client->pipeline.buf_pos;
+    uv_buf_t buf;
+    buf.base = client->pipeline.buf_pos;
+    buf.len = (int)nread;
+    LOGi("%s: not parsed data size = %d", __func__, (int)nread);
+    read_cb((uv_stream_t *)client, nread, &buf);
+    // continue read master buffer
+}
+
 void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
 {
     int err = 0;
@@ -296,20 +362,70 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
         LOGt(buf->base);
     }
     
+    client->request.parser_locked = true;
     enum llhttp_errno error = llhttp_execute(parser, buf->base, nread);
+    if (error == HPE_PAUSED) {
+        char * pos = (char *)llhttp_get_error_pos(parser);
+        if (pos >= buf->base + nread) {
+            if (client->pipeline.status >= PS_ACTIVE) {
+                pipeline_close(client, true);  // master buffer freed
+                buf = NULL;  // block double "free" call for master buffer
+                LOGd("%s: PIPELINE deactivated! (FULL)", __func__);
+            }
+            client->request.parser_locked = false;
+            error = HPE_OK;  // received data fully parsed
+        }
+        else {
+            if (client->pipeline.status == PS_RESTING) {
+                client->pipeline.status = PS_ACTIVE;
+                client->pipeline.buf_base = buf->base;
+                client->pipeline.buf_pos = pos;
+                client->pipeline.buf_end = buf->base + nread;
+                LOGi("%s: PIPELINE Activate: pos = %p", __func__, pos);
+                if (g_srv.num_pipeline == 0) {
+                    uv_idle_start(&g_srv.worker, idle_worker_cb);
+                }
+                g_srv.num_pipeline++;
+            }
+            if (g_log_level >= LL_DEBUG) {
+                ssize_t s1 = (size_t)pos - (size_t)client->pipeline.buf_base;
+                ssize_t s2 = (size_t)client->pipeline.buf_end - (size_t)pos;
+                LOGd("%s: pos = %p (%d + %d = %d)", __func__, pos, (int)s1, (int)s2, (int)(s1+s2));
+            }
+            client->pipeline.buf_pos = pos;
+            uv_read_stop(handle);
+        }
+        error = HPE_OK;
+    }
     if (error != HPE_OK) {
+        const char * err_pos = llhttp_get_error_pos(parser);
         LOGe("Parse error: %s %s\n", llhttp_errno_name(error), client->request.parser.reason);
         act = send_fatal(client, HTTP_STATUS_BAD_REQUEST, NULL);
         err = 0;  // skip call send_error
         goto fin;
     }
     if (client->request.load_state < LS_MSG_END) {
+        if (client->pipeline.status >= PS_ACTIVE) {
+            if (buf->base + nread < client->pipeline.buf_end) {
+                LOGc("%s: incorrect PIPELINE chunk", __func__);
+                err = HTTP_STATUS_BAD_REQUEST;
+            }
+            pipeline_close(client, true);  // master buffer freed
+            buf = NULL;  // block double "free" call for master buffer
+            LOGd("%s: PIPELINE deactivated! (partial)", __func__);
+            client->request.parser_locked = true;
+            if (err) {            
+                act = send_fatal(client, err, NULL);
+                err = 0;  // skip call send_error
+                goto fin;
+            }
+        }
         if (client->error) {
             err = HTTP_STATUS_BAD_REQUEST;
             goto fin;
         }
         LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %lld", client->request.load_state, client->request.wsgi_input_size);
-        // continue read from socket
+        // continue read from socket (or read from PIPELINE master buffer)
         goto fin;
     }
     if (client->request.load_state != LS_OK) {
@@ -339,7 +455,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     act = stream_write(client);
 
 fin:
-    if (buf->base)
+    if (buf && buf->base)
         free_read_buffer(client, buf->base);
 
     if (PyErr_Occurred()) {
@@ -353,8 +469,10 @@ fin:
             err = HTTP_STATUS_BAD_REQUEST;
         act = send_error(client, err, NULL);
     }
-    if (client->request.load_state >= LS_MSG_END) {
+    if (client->request.parser_locked == false) {
         llhttp_reset(&client->request.parser);
+    }
+    if (client->request.load_state >= LS_MSG_END) {
         client->request.load_state = LS_WAIT;
     }
     if (act == CA_SHUTDOWN) {
@@ -377,7 +495,10 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
     LOGt("%s: size = %d (suggested = %d)", __func__, read_buffer_size, (int)suggested_size);
     buf->base = NULL;
     buf->len = 0;
-
+    if (client->pipeline.status >= PS_ACTIVE) {
+        LOGc("%s: __undefined_behavior__ PIPELINE is active", __func__);
+        return;
+    }
     int buf_prealloc = 0;
     xbuf_t * rb = NULL;
     for (size_t i = 0; i < ARRAY_SIZE(client->rbuf); i++) {
@@ -430,10 +551,22 @@ void connection_cb(uv_stream_t * server, int status)
     client->srv = &g_srv;
 
     uv_tcp_init(g_srv.loop, &client->handle);
-    uv_tcp_nodelay(&client->handle, 0);
-    uv_tcp_keepalive(&client->handle, 1, 60);
+    
+    uv_tcp_nodelay(&client->handle, (g_srv.tcp_nodelay > 0) ? 1 : 0);
+    
+    if (g_srv.tcp_keepalive < 0)
+        uv_tcp_keepalive(&client->handle, 0, 60);  // disable
 
-    client->handle.data = client;
+    if (g_srv.tcp_keepalive >= 1)
+        uv_tcp_keepalive(&client->handle, 1, g_srv.tcp_keepalive);  // enable and set timeout
+
+    if (g_srv.tcp_send_buf_size > 0) 
+        uv_send_buffer_size((uv_handle_t *)client, &g_srv.tcp_send_buf_size);
+
+    if (g_srv.tcp_recv_buf_size > 0) 
+        uv_recv_buffer_size((uv_handle_t *)client, &g_srv.tcp_recv_buf_size);
+
+    client->handle.data = MAGIC_CLIENT;
 
     int rc = uv_accept(server, (uv_stream_t*)&client->handle);
     if (rc) {
@@ -527,6 +660,10 @@ int init_srv()
         uv_signal_init(g_srv.loop, &g_srv.signal);
         uv_signal_start(&g_srv.signal, signal_handler, SIGINT);
     }
+    if (1) {  // always enable support HTTP pipelining
+        uv_idle_init(g_srv.loop, &g_srv.worker);
+        g_srv.worker.data = NULL;
+    }
     g_srv_inited = 1;
     hr = 0;
 
@@ -535,6 +672,10 @@ fin:
         if (g_srv.signal.signal_cb)
             uv_signal_stop(&g_srv.signal);
 
+        if (g_srv.worker.type == UV_IDLE) {
+            uv_idle_stop(&g_srv.worker);
+            uv_close((uv_handle_t *)&g_srv.worker, NULL);
+        }
         if (hr <= -5)
             uv_close((uv_handle_t *)&g_srv, NULL);
 
@@ -623,6 +764,18 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     g_srv.read_buffer_size = (rv >= 0) ? (size_t)rv : (size_t)def_read_buffer_size;
     g_srv.read_buffer_size = _min(g_srv.read_buffer_size, MAX_read_buffer_size);
     g_srv.read_buffer_size = _max(g_srv.read_buffer_size, MIN_read_buffer_size);
+
+    rv = get_obj_attr_int(server, "tcp_nodelay");
+    g_srv.tcp_nodelay = (rv >= 0) ? (int)rv : 0;
+
+    rv = get_obj_attr_int(server, "tcp_keepalive");
+    g_srv.tcp_keepalive = (rv >= -1) ? (int)rv : 0;
+
+    rv = get_obj_attr_int(server, "tcp_send_buf_size");
+    g_srv.tcp_send_buf_size = (rv >= 0) ? (int)rv : 0;
+
+    rv = get_obj_attr_int(server, "tcp_recv_buf_size");
+    g_srv.tcp_recv_buf_size = (rv >= 0) ? (int)rv : 0;
 
     rv = get_obj_attr_int(server, "nowait");
     g_srv.nowait.mode = (rv <= 0) ? 0 : (int)rv;
@@ -724,6 +877,10 @@ PyObject * close_server(PyObject * Py_UNUSED(self), PyObject * Py_UNUSED(server)
         if (g_srv.signal.signal_cb) {
             uv_signal_stop(&g_srv.signal);
             g_srv.signal.signal_cb = NULL;
+        }
+        if (g_srv.worker.type == UV_IDLE) {
+            uv_idle_stop(&g_srv.worker);
+            uv_close((uv_handle_t *)&g_srv.worker, NULL);
         }
         uv_close((uv_handle_t *)&g_srv, NULL);
         uv_loop_close(g_srv.loop);

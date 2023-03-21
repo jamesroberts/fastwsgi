@@ -28,6 +28,10 @@ class _Server():
         self.max_content_length = None  # def value: 999999999
         self.max_chunk_size = None      # def value: 256 KiB
         self.read_buffer_size = None    # def value: 64 KiB
+        self.tcp_nodelay = 0            # 0 = Nagle's algo enabled; 1 = Nagle's algo disabled;
+        self.tcp_keepalive = 0          # -1 = disabled; 0 = system default; 1...N = timeout in seconds
+        self.tcp_send_buf_size = 0      # 0 = system default; 1...N = size in bytes
+        self.tcp_recv_buf_size = 0      # 0 = system default; 1...N = size in bytes
         self.nowait = 0
         self.num_workers = 1
         self.worker_list = [ ]

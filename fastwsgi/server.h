@@ -31,6 +31,8 @@ typedef struct {
     uv_tcp_t server;  // Placement strictly at the beginning of the structure!
     PyObject * pysrv; // object fastwsgi.py@_Server
     uv_loop_t* loop;
+    uv_idle_t worker;  // worker for HTTP pipelining
+    int num_pipeline;  // number of active pipelines
     uv_os_fd_t file_descriptor;
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
@@ -44,12 +46,21 @@ typedef struct {
     size_t read_buffer_size;
     uint64_t max_content_length;
     size_t max_chunk_size;
+    int tcp_nodelay;       // 0 = Nagle's algo enabled; 1 = Nagle's algo disabled;
+    int tcp_keepalive;     // negative = disabled; 0 = system default; 1...N = timeout in seconds
+    int tcp_send_buf_size; // 0 = system default; 1...N = size in bytes
+    int tcp_recv_buf_size; // 0 = system default; 1...N = size in bytes
     struct {
         int mode;          // 0 - disabled, 1 - nowait active, 2 - nowait with wait disconnect all peers
         int base_handles;  // number of base handles (listen socket + signal)
     } nowait;
     int exit_code;
 } server_t;
+
+typedef enum {
+    PS_RESTING    = 0,  // pipeline not used
+    PS_ACTIVE     = 1   // pipeline active for reading from master buffer
+} pl_status_t;
 
 typedef enum {
     LS_WAIT            = 0,
@@ -67,6 +78,12 @@ typedef struct {
     char remote_addr[64];
     xbuf_t rbuf[2];      // buffers for reading from socket
     struct {
+        pl_status_t status;  // pipeline status
+        char * buf_base;     // master buffer with pipeline-requests
+        char * buf_pos;      // parser cursor position (into master buf)
+        char * buf_end;
+    } pipeline;
+    struct {
         int load_state;
         int64_t http_content_length; // -1 = "Content-Length" not specified
         int chunked;             // Transfer-Encoding: chunked
@@ -79,6 +96,7 @@ typedef struct {
         PyObject* wsgi_input;  // type: io.BytesIO
         int64_t wsgi_input_size;   // total size of wsgi_input PyBytes stream
         llhttp_t parser;
+        bool parser_locked;
     } request;
     int error;    // error code on process request and response
     xbuf_t head;  // dynamic buffer for request and response headers data
