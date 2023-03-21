@@ -430,7 +430,7 @@ int on_message_complete(llhttp_t * parser)
         const int64_t ilen = client->request.wsgi_input_size;
         if (ilen != clen) {
             client->error = 1;
-            LOGc("Received body with size %lld not equal specified 'Content-Length' = %lld", ilen, clen);
+            LOGc("Received body with size %lld not equal specified 'Content-Length' = %lld", (long long)ilen, (long long)clen);
             return -1;
         }
     }
@@ -469,7 +469,7 @@ int on_message_complete(llhttp_t * parser)
         set_header(client, g_cv.REMOTE_ADDR, client->remote_addr, -1, 0);
 
     if (client->request.chunked && client->request.http_content_length < 0) {
-        sprintf(buf, "%lld", client->request.wsgi_input_size);
+        sprintf(buf, "%lld", (long long)client->request.wsgi_input_size);
         set_header(client, g_cv.CONTENT_LENGTH, buf, -1, 0);
         // Insertion of this header is allowed because the header "Transfer-Encoding" FastWSGI server removes!
         // https://peps.python.org/pep-3333/#other-http-features
@@ -624,7 +624,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     }
     if (response) {
         char scode[4];
-        size_t status_len = 0;
+        Py_ssize_t status_len = 0;
         const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
         if (status_len < 3)
             return -2;
@@ -649,7 +649,7 @@ int build_response(client_t * client, int flags, int status, const void * header
         for (Py_ssize_t i = 0; i < hsize; i++) {
             PyObject* tuple = PyList_GET_ITEM(response->headers, i);
 
-            size_t key_len = 0;
+            Py_ssize_t key_len = 0;
             const char * key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
 
             if (key_len == 14 && key[7] == '-')
@@ -664,7 +664,7 @@ int build_response(client_t * client, int flags, int status, const void * header
                 if (strcasecmp(key, "Date") == 0)
                     resp_date_present = 1;
 
-            size_t value_len = 0;
+            Py_ssize_t value_len = 0;
             const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
 
             xbuf_add(head, key, key_len);
@@ -731,8 +731,8 @@ end:
     }
     else if (body_size > 0) {
         char * buf = xbuf_expand(head, 48);
-        head->size += sprintf(buf, "Content-Length: %lld\r\n", body_size);
-        LOGi("Added Header 'Content-Length: %lld'", body_size);
+        head->size += sprintf(buf, "Content-Length: %lld\r\n", (long long)body_size);
+        LOGi("Added Header 'Content-Length: %lld'", (long long)body_size);
     }
     xbuf_add(head, "\r\n", 2);  // end of headers
 
@@ -752,9 +752,9 @@ int get_info_from_wsgi_response(client_t * client)
     Py_ssize_t hsize = PyList_GET_SIZE(response->headers);
     for (Py_ssize_t i = 0; i < hsize; i++) {
         PyObject* tuple = PyList_GET_ITEM(response->headers, i);
-        size_t key_len = 0;
+        Py_ssize_t key_len = 0;
         const char * key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
-        size_t value_len = 0;
+        Py_ssize_t value_len = 0;
         const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
         if (key_len == 14 && key[7] == '-' && strcasecmp(key, "Content-Length") == 0) {
             if (value_len == 0)
@@ -767,7 +767,7 @@ int get_info_from_wsgi_response(client_t * client)
                 if (clen <= 0 || clen == LLONG_MAX)
                     return -3;  // error
             }
-            LOGi("wsgi response: content-length = %lld", clen);
+            LOGi("wsgi response: content-length = %lld", (long long)clen);
             client->response.wsgi_content_length = clen;
         }
     }
@@ -795,7 +795,7 @@ PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr)
         return NULL;
     }
     PyObject* item;
-    while (item = PyIter_Next(client->response.body_iterator)) {
+    while ( (item = PyIter_Next(client->response.body_iterator)) != NULL ) {
         if (!PyBytes_Check(item)) {
             client->error = 11;
             if (outpyerr)
@@ -875,7 +875,7 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
     int fully_loaded = 1;
     ssize_t prev_size = 0;
     size_t chunks = 0;
-    while (item = wsgi_iterator_get_next_chunk(client, 1)) {
+    while ( (item = wsgi_iterator_get_next_chunk(client, 1)) != NULL ) {
         ssize_t item_size = PyBytes_GET_SIZE(item);
         body[chunks++] = item;
         client->response.body_chunk_num = chunks;
@@ -890,7 +890,7 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
         }
         if (is_filelike) {
             // Only filelike data source check for max chunk size
-            if (client->response.body_preloaded_size + prev_size >= g_srv.max_chunk_size) {
+            if (client->response.body_preloaded_size + prev_size >= (int64_t)g_srv.max_chunk_size) {
                 LOGd("wsgi_body: overflow chunk buffer! Preloaded size = %d", client->response.body_preloaded_size);
                 fully_loaded = 0;
                 break;
@@ -907,17 +907,17 @@ int wsgi_body_pleload(client_t * client, PyObject * wsgi_body)
             LOGc("wsgi_body: real size of the response body exceeds the specified Content-Length");
             return -14;
         }
-        LOGi("wsgi_body: response body fully loaded! (size = %lld)", client->response.body_preloaded_size);
+        LOGi("wsgi_body: response body fully loaded! (size = %lld)", (long long)client->response.body_preloaded_size);
         client->response.body_total_size = client->response.body_preloaded_size;
         return 1;
     }
     if (client->response.body_preloaded_size == wsgi_content_length) {
-        LOGi("wsgi_body: response body fully loaded! (SIZE = %lld)", wsgi_content_length);
+        LOGi("wsgi_body: response body fully loaded! (SIZE = %lld)", (long long)wsgi_content_length);
         client->response.body_total_size = wsgi_content_length;
         return 1;
     }
     if (wsgi_content_length > 0) {
-        LOGd("wsgi_body: large content transfer begins. body_total_size = %lld", wsgi_content_length);
+        LOGd("wsgi_body: large content transfer begins. body_total_size = %lld", (long long)wsgi_content_length);
         client->response.body_total_size = wsgi_content_length;
         return 1;
     }

@@ -5,11 +5,14 @@ from setup_libuv import build_libuv
 
 SOURCES = glob.glob("fastwsgi/*.c") + glob.glob("llhttp/src/*.c")
 
+ext_compile_args = [ "-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall" ]
+ext_compile_args += [ "-Wno-unused-function", "-Wno-unused-variable" ]
+
 module = Extension(
     "_fastwsgi",
     sources=SOURCES,
     include_dirs=["llhttp/include", "libuv/include"],
-    extra_compile_args=["-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall"],
+    extra_compile_args=ext_compile_args
 )
 
 with open("README.md", "r", encoding="utf-8") as read_me:
