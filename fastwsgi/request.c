@@ -135,12 +135,6 @@ void reset_response_body(client_t * client)
 
 // ============== request processing ==================================================
 
-int on_reset(llhttp_t * parser)
-{
-    LOGf("%s: Detect HTTP pipelining! Pipelining not supported!", __func__);
-    return -1;
-}
-
 int on_message_begin(llhttp_t * parser)
 {
     LOGi("on_message_begin: ------------------------------");
@@ -427,7 +421,7 @@ int on_message_complete(llhttp_t * parser)
     }
     if (client->error) {
         if (client->request.expect_continue && client->error == HTTP_STATUS_EXPECTATION_FAILED)
-            return 0;
+            return HPE_PAUSED;
         return -1;
     }
 
@@ -482,6 +476,13 @@ int on_message_complete(llhttp_t * parser)
     }
 
     client->request.load_state = LS_OK;
+    return HPE_PAUSED;
+}
+
+int on_reset(llhttp_t * parser)
+{
+    // This callback called only on HTTP pipelining
+    //LOGi("%s: Detect HTTP pipelining!", __func__);
     return 0;
 }
 
@@ -953,7 +954,6 @@ void init_request_dict()
 void configure_parser_settings(llhttp_settings_t * ps)
 {
     llhttp_settings_init(ps);
-    ps->on_reset = on_reset;
     ps->on_message_begin = on_message_begin;
     ps->on_url = on_url;
     ps->on_url_complete = on_url_complete;
@@ -964,4 +964,5 @@ void configure_parser_settings(llhttp_settings_t * ps)
     ps->on_headers_complete = on_headers_complete;
     ps->on_body = on_body;
     ps->on_message_complete = on_message_complete;
+    ps->on_reset = on_reset;
 }
