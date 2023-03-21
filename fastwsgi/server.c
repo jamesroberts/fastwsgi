@@ -148,7 +148,7 @@ void write_cb(uv_write_t * req, int status)
             goto fin;
         }
         if (client->response.body_total_written == body_total_size) {
-            LOGd("%s: Response body is completely streamed. body_total_size = %lld", __func__, body_total_size);
+            LOGd("%s: Response body is completely streamed. body_total_size = %lld", __func__, (long long)body_total_size);
             goto fin;
         }
     }
@@ -424,7 +424,8 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
             err = HTTP_STATUS_BAD_REQUEST;
             goto fin;
         }
-        LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %lld", client->request.load_state, client->request.wsgi_input_size);
+        LOGt("http chunk parsed: load_state = %d, wsgi_input_size = %lld",
+            (long long)client->request.load_state, (long long)client->request.wsgi_input_size);
         // continue read from socket (or read from PIPELINE master buffer)
         goto fin;
     }
@@ -438,7 +439,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
         err = HTTP_STATUS_BAD_REQUEST;
         goto fin;
     }
-    LOGd("HTTP request successfully parsed (wsgi_input_size = %lld)", client->request.wsgi_input_size);
+    LOGd("HTTP request successfully parsed (wsgi_input_size = %lld)", (long long)client->request.wsgi_input_size);
     err = call_wsgi_app(client);
     if (err) {
         goto fin;
@@ -451,7 +452,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     if (err) {
         goto fin;
     }
-    LOGi("Response created! (len = %d+%lld)", client->head.size, client->response.body_preloaded_size);
+    LOGi("Response created! (len = %d+%lld)", client->head.size, (long long)client->response.body_preloaded_size);
     act = stream_write(client);
 
 fin:
