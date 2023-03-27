@@ -93,12 +93,7 @@ int reset_wsgi_input(client_t * client)
 
 void free_start_response(client_t * client)
 {
-    if (client->start_response) {
-        Py_CLEAR(client->start_response->headers);
-        Py_CLEAR(client->start_response->status);
-        Py_CLEAR(client->start_response->exc_info);
-        Py_CLEAR(client->start_response);
-    }
+    Py_CLEAR(client->start_response);
 }
 
 void reset_response_preload(client_t * client)
