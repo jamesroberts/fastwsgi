@@ -5,6 +5,7 @@
 #include "llhttp.h"
 #include "request.h"
 #include "xbuf.h"
+#include "asgi.h"
 
 #define max_preloaded_body_chunks 48
 
@@ -38,6 +39,7 @@ typedef struct {
     uv_os_fd_t file_descriptor;
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
+    PyObject* asgi_app;
     int ipv6;
     char host[64];
     int port;
@@ -57,6 +59,7 @@ typedef struct {
         int base_handles;  // number of base handles (listen socket + signal)
     } nowait;
     int exit_code;
+    asyncio_t aio;
 } server_t;
 
 typedef enum {
@@ -85,6 +88,7 @@ typedef struct {
         char * buf_pos;      // parser cursor position (into master buf)
         char * buf_end;
     } pipeline;
+    asgi_t * asgi;       // ASGI 3.0 implementation
     struct {
         int load_state;
         int64_t http_content_length; // -1 = "Content-Length" not specified
@@ -149,6 +153,7 @@ typedef enum {
     RF_EMPTY           = 0x00,
     RF_SET_KEEP_ALIVE  = 0x01,
     RF_HEADERS_WSGI    = 0x02,
+    RF_HEADERS_ASGI    = 0x04,
     RF__MAX
 } response_flag_t;
 

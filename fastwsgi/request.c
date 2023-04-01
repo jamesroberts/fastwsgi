@@ -12,11 +12,72 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
 {
     int hr = 0;
     ssize_t vlen = (length >= 0) ? length : strlen(value);
-    LOGi("set_header: %s = '%.*s'", PyUnicode_AsUTF8(key), (int)vlen, value);
+    LOGi("set_header: %s = '%.*s'", PyBytes_Check(key) ? PyBytes_AS_STRING(key) : PyUnicode_AsUTF8(key), (int)vlen, value);
     PyObject * dict = NULL;
     PyObject * kname = NULL;
     PyObject * val = NULL;
-    {
+    if (client->asgi) {
+        PyObject * scope = client->asgi->scope;
+        dict = scope;
+        if (key == g_cv.PATH_INFO) {            
+            val = PyUnicode_DecodeLatin1(value, vlen, NULL);
+            hr = PyDict_SetItem(scope, g_cv.path, val);
+            Py_XDECREF(val);
+            FIN_IF(hr, hr);
+            kname = g_cv.raw_path;
+            val = NULL;
+        }
+        else if (key == g_cv.QUERY_STRING) {
+            kname = g_cv.query_string;
+        }
+        else if (key == g_cv.SCRIPT_NAME) {
+            kname = g_cv.root_path;
+            val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
+        }
+        else if (key == g_cv.REQUEST_METHOD) {
+            kname = g_cv.method;
+        }
+        else if (key == g_cv.SERVER_PROTOCOL) {
+            kname = g_cv.http_version;
+            if (client->request.parser.http_major == 1) {
+                if (client->request.parser.http_minor == 1) {
+                    val = PyUnicode_FromStringAndSize("1.1", 3);
+                } else {
+                    val = PyUnicode_FromStringAndSize("1.0", 3);
+                }
+            }
+            else if (client->request.parser.http_major == 2) {
+                val = PyUnicode_FromStringAndSize("2", 1);
+            }
+        }
+        else if (key == g_cv.REMOTE_ADDR) {
+            kname = g_cv.REMOTE_ADDR;  // FIXME: set "client"
+        }
+        if (!val) {
+            val = PyBytes_FromStringAndSize(value, vlen);
+            FIN_IF(!val, -78);
+        }
+        if (!kname) {
+            // only for "scope.headers"
+            if (key == g_cv.CONTENT_LENGTH) {
+                key = g_cv.ContentLength;
+            }
+            PyObject * scope_headers = PyDict_GetItem(scope, g_cv.headers);
+            if (!scope_headers) {
+                scope_headers = PyList_New(0);
+                PyDict_SetItem(scope, g_cv.headers, scope_headers);
+                Py_DECREF(scope_headers);
+            }
+            if (!PyBytes_Check(key)) {
+                kname = PyBytes_FromString(PyUnicode_AsUTF8(key));
+            }
+            PyObject * tup = PyTuple_Pack(2, (kname != NULL) ? kname : key, val);
+            Py_XDECREF(kname);
+            PyList_Append(scope_headers, tup);
+            Py_DECREF(tup);
+            FIN(0);
+        }
+    } else {
         dict = client->request.headers;
         kname = key;
         if (key == g_cv.PATH_INFO || key == g_cv.QUERY_STRING) {
@@ -42,7 +103,12 @@ int set_header_v(client_t * client, const char * key, const char * value, ssize_
     size_t klen = strlen(key);
     if (klen == 0)
         return -12;
-    PyObject * pkey = PyUnicode_FromStringAndSize(key, klen);
+    PyObject * pkey;
+    if (client->asgi) {
+        pkey = PyBytes_FromStringAndSize(key, klen);
+    } else {
+        pkey = PyUnicode_FromStringAndSize(key, klen);
+    }
     int retval = set_header(client, pkey, value, length, flags);
     Py_DECREF(pkey);
     return retval;
@@ -132,10 +198,12 @@ int on_message_begin(llhttp_t * parser)
         LOGc("Received new HTTP request while sending response! Disconnect client!");
         return -1;
     }
-    Py_CLEAR(client->request.headers);  // wsgi_input: refcnt 2 -> 1
-    // Sets up base request dict for new incoming requests
-    // https://www.python.org/dev/peps/pep-3333/#specification-details
-    client->request.headers = PyDict_Copy(g_base_dict);
+    if (!g_srv.asgi_app) {
+        Py_CLEAR(client->request.headers);  // wsgi_input: refcnt 2 -> 1
+        // Sets up base request dict for new incoming requests
+        // https://www.python.org/dev/peps/pep-3333/#specification-details
+        client->request.headers = PyDict_Copy(g_base_dict);
+    }
     client->request.http_content_length = -1; // not specified
     client->request.chunked = 0;
     client->request.expect_continue = 0;
@@ -144,6 +212,9 @@ int on_message_begin(llhttp_t * parser)
     free_start_response(client);
     reset_response_body(client);
     client->response.wsgi_content_length = -1;
+    if (g_srv.asgi_app) {
+        asgi_init(client);
+    }
     return 0;
 }
 
@@ -187,7 +258,7 @@ int on_header_field(llhttp_t * parser, const char * data, size_t length)
 
     LOGd("%s: '%.*s'", __func__, (int)length, data);
     client_t * client = (client_t *)parser->data;
-    if (client->request.current_key_len == 0) {
+    if (client->request.current_key_len == 0 && !client->asgi) {
         xbuf_add(&client->head, "HTTP_", 5);
         client->request.current_key_len = 5;
     }
@@ -203,7 +274,7 @@ int on_header_field_complete(llhttp_t * parser)
     xbuf_t * buf = &client->head;
     char * data = buf->data;
     ssize_t size = buf->size;
-    ssize_t prefix_len = 5;  // prefix "HTTP_"
+    ssize_t prefix_len = (client->asgi) ? 0 : 5;  // prefix "HTTP_"
     if (size <= prefix_len) {
         LOGi("%s: Unnamed field!", __func__);        
         goto fin;
@@ -217,7 +288,7 @@ int on_header_field_complete(llhttp_t * parser)
             client->request.current_val_len = 0;
             return 0;  // skip incorrect header
         }
-        if ((unsigned char)symbol >= 127) {
+        if (client->asgi || (unsigned char)symbol >= 127) {
             continue;
         }
         if (symbol == '-') {
@@ -274,13 +345,22 @@ int on_header_value_complete(llhttp_t * parser)
     char * key = buf->data;
     char * val = buf->data + key_len + 1;
     LOGi("%s: '%s'", __func__, val);
-    size_t prefix_len = 5;
+    size_t prefix_len = (client->asgi) ? 0 : 5;
     if (key_len <= prefix_len) {
         LOGw("%s: Headers has an unnamed value!", __func__);        
         return 0;  // skip incorrect header
     }
     header_name_t hname = HN_UNKNOWN;
-    {
+    if (client->asgi) {
+        if (key_len == 14 && strcasecmp(key, "CONTENT-LENGTH") == 0)
+            hname = HN_CONTENT_LENGTH;
+        else if (key_len == 12 && strcasecmp(key, "CONTENT-TYPE") == 0)
+            hname = HN_CONTENT_TYPE;
+        else if (key_len == 17 && strcasecmp(key, "TRANSFER-ENCODING") == 0)
+            hname = HN_TRANSFER_ENCODING;
+        else if (key_len == 6 && strcasecmp(key, "EXPECT") == 0)
+            hname = HN_EXPECT;
+    } else {
         if (key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0)
             hname = HN_CONTENT_LENGTH;
         else if (key_len == 17 && strncmp(key, "HTTP_CONTENT_TYPE", 17) == 0)
@@ -624,6 +704,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     reset_head_buffer(client);
     PyObject** body = client->response.body;
     StartResponse * response = NULL;
+    PyObject * asgi_dict = NULL;
     int64_t body_size = _body_size;
     bool resp_date_present = false;
 
@@ -638,6 +719,15 @@ int build_response(client_t * client, int flags, int status, const void * header
         scode[3] = 0;
         status = atoi(scode);
     }
+    else if (flags & RF_HEADERS_ASGI) {
+        asgi_dict = (PyObject *)headers;
+        headers = NULL;
+        if (status == 0) {
+            PyObject * _status = PyDict_GetItem(asgi_dict, g_cv.status);
+            FIN_IF(!_status, -2);
+            status = (int)PyLong_AsLong(_status);
+        }
+    }
     if (status == 204 || status == 304) {
         body_size = 0;
         reset_response_body(client);  // forced reset body buffers
@@ -649,14 +739,41 @@ int build_response(client_t * client, int flags, int status, const void * header
     char * buf = xbuf_expand(head, 128);
     head->size += sprintf(buf, "HTTP/1.1 %d %s\r\n", status, status_name);
 
-    if (response) {
-        Py_ssize_t hsize = PyList_GET_SIZE(response->headers);
-        for (Py_ssize_t i = 0; i < hsize; i++) {
+    if (response || asgi_dict) {
+        PyObject * asgi_headers = NULL;
+        PyObject * iterator = NULL;
+        Py_ssize_t hsize = 0;
+        if (response) {
+            FIN_IF(!response->headers, -4);
+            hsize = PyList_GET_SIZE(response->headers);
+        } else {
+            asgi_headers = PyDict_GetItem(asgi_dict, g_cv.headers);
+            FIN_IF(!asgi_headers, -4);
+            iterator = PyObject_GetIter(asgi_headers);
+            FIN_IF(!iterator, -5);
+        }
+        PyObject * item = NULL;
+        for (Py_ssize_t i = 0; /* nothing */ ; i++) {
             const char * key;
             Py_ssize_t key_len = 0;
             const char * val;
             Py_ssize_t val_len = 0;
-            {
+            if (asgi_dict) {
+                Py_XDECREF(item);
+                item = PyIter_Next(iterator);
+                if (!item)
+                    break;
+
+                key_len = asgi_get_data_from_header(item, 0, &key);
+                val_len = asgi_get_data_from_header(item, 1, &val);
+                if (key_len < 0 || val_len < 0) {
+                    hr = -59;
+                    break;
+                }
+            } else {
+                if (i >= hsize)
+                    break;
+
                 PyObject * tuple = PyList_GET_ITEM(response->headers, i);
                 key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
                 val = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &val_len);
@@ -681,6 +798,9 @@ int build_response(client_t * client, int flags, int status, const void * header
 
             LOGi("added header '%s: %s'", key, val);
         }
+        Py_XDECREF(item);
+        Py_XDECREF(iterator);
+        FIN_IF(hr, hr);
     }
     else if (headers) {
         xbuf_add_str(head, (const char *)headers);

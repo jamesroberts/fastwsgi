@@ -76,6 +76,7 @@ void close_cb(uv_handle_t * handle)
     free_start_response(client);
     reset_response_body(client);
     free_read_buffer(client, NULL);
+    asgi_free(client);
     free(client);
     update_log_prefix(NULL);
 }
@@ -177,6 +178,9 @@ void write_cb(uv_write_t * req, int status)
             goto fin;
         }
     }
+    if (client->asgi) {
+        goto fin;
+    }
     client->error = 0;
     PyObject * chunk = wsgi_iterator_get_next_chunk(client, 0);
     if (!chunk) {
@@ -219,11 +223,30 @@ fin:
     if (!client->request.keep_alive || !client->srv->allow_keepalive) {
         close_conn = 1;
     }
+    if (client->asgi) {
+        reset_head_buffer(client);
+        if (status < 0) {
+            // cancel await current app.send()
+            asgi_future_set_exception(client, &client->asgi->send.future, "Write error: %d", status);
+        }
+        else {
+            PyObject * result = Py_True;
+            Py_INCREF(result);
+            // complete await current app.send()
+            int err = asgi_future_set_result(client, &client->asgi->send.future, result);
+        }        
+        if (client->asgi->send.latest_chunk) {
+            LOGd("%s: ASGI last chunk sended!", __func__);
+        } else {
+            return;  // continue sending chunks 
+        }
+    }
     if (!close_conn) {
         reset_response_body(client);
         wreq->client = NULL;  // free write_req
         if (client->pipeline.status == PS_RESTING) {
-            stream_read_start(client);
+            if (!client->asgi)
+                stream_read_start(client);
         }
     }
     if (close_conn) {
@@ -467,6 +490,12 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
         goto fin;
     }
     LOGd("HTTP request successfully parsed (wsgi_input_size = %lld)", (long long)client->request.wsgi_input_size);
+    if (client->asgi) {
+        err = asgi_call_app(client);
+        if (!err)
+            uv_read_stop(handle);
+        goto fin;
+    }
     err = call_wsgi_app(client);
     if (err) {
         goto fin;
@@ -652,6 +681,11 @@ int init_srv()
     init_constants();
     init_request_dict();
     PyType_Ready(&StartResponse_Type);
+    if (g_srv.asgi_app) {
+        PyType_Ready(&ASGI_Type);
+        hr = asyncio_init(&g_srv.aio);
+        FIN_IF(hr, hr);
+    }
 
     sockaddr_t addr;
     int tcp_flags = 0;
@@ -712,6 +746,9 @@ fin:
         if (g_srv.loop)
             uv_loop_close(g_srv.loop);
 
+        if (g_srv.aio.asyncio)
+            asyncio_free(&g_srv.aio, false);
+
         memset(&g_srv, 0, sizeof(g_srv));
     }    
     return hr;
@@ -736,13 +773,19 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     }
     set_log_level((int)loglevel);
 
-    g_srv.wsgi_app = PyObject_GetAttrString(server, "app");
-    Py_XDECREF(g_srv.wsgi_app);
-    if (!g_srv.wsgi_app) {
+    PyObject * app = PyObject_GetAttrString(server, "app");
+    Py_XDECREF(app);
+    if (!app) {
         PyErr_Format(PyExc_ValueError, "Option app not defined");
         return PyLong_FromLong(-1011);
-    }    
-
+    }
+    if (asgi_app_check(app) == true) {
+        LOGn("%s: Detect ASGI app", __func__);
+        g_srv.asgi_app = app;
+    } else {
+        LOGn("%s: Detect WSGI app", __func__);
+        g_srv.wsgi_app = app;
+    }
     const char * host = get_obj_attr_str(server, "host");
     if (!host || strlen(host) >= sizeof(g_srv.host) - 1) {
         PyErr_Format(PyExc_ValueError, "Option host not defined");
@@ -850,9 +893,18 @@ PyObject * run_server(PyObject * self, PyObject * server)
     if (!g_srv_inited) {
         PyErr_Format(PyExc_Exception, "server not inited");
         return PyLong_FromLong(-1);
+    }    
+    if (g_srv.asgi_app) {
+        asyncio_t * aio = &g_srv.aio;
+        PyObject * res;
+        res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, aio->uni_loop, NULL);
+        Py_XDECREF(res);
+        res = PyObject_CallFunctionObjArgs(aio->loop.run_forever, NULL);
+        Py_XDECREF(res);
     }
-    uv_run(g_srv.loop, UV_RUN_DEFAULT);
-    
+    else {
+        uv_run(g_srv.loop, UV_RUN_DEFAULT);
+    }
     const char * reason = (g_srv.exit_code == 1) ? "(SIGINT)" : "";
     LOGn("%s: FIN %s", __func__, reason);
     PyObject * rc = close_server(self, server);
