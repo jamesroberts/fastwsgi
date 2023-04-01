@@ -28,7 +28,7 @@ void init_constants()
     g_cv.wsgi_multithread = PyUnicode_FromString("wsgi.multithread");
     g_cv.wsgi_multiprocess = PyUnicode_FromString("wsgi.multiprocess");
     g_cv.wsgi_input = PyUnicode_FromString("wsgi.input");
-    g_cv.version = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
+    g_cv.wsgi_ver_1_0 = PyTuple_Pack(2, PyLong_FromLong(1), PyLong_FromLong(0));
 
     g_cv.http_scheme = PyUnicode_FromString("http");
     g_cv.HTTP_1_1 = PyUnicode_FromString("HTTP/1.1");

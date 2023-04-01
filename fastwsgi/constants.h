@@ -22,7 +22,7 @@ typedef struct {
     PyObject* wsgi_multithread;
     PyObject* wsgi_multiprocess;
     PyObject* wsgi_input;
-    PyObject* version;
+    PyObject* wsgi_ver_1_0;  // PyTuple(1, 0)
 
     PyObject* http_scheme;
     PyObject* HTTP_1_1;

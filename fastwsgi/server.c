@@ -38,6 +38,24 @@ void free_read_buffer(client_t * client, void * data)
     }
 }
 
+int stream_read_start(client_t * client)
+{
+    if (client->response.write_req.client)
+        return -1;
+
+    if (client->pipeline.status >= PS_ACTIVE)
+        return -1;
+
+    uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    return 0;
+}
+
+int stream_read_stop(client_t * client)
+{
+    uv_read_stop((uv_stream_t *)client);
+    return 0;
+}
+
 typedef enum {
     CA_OK           = 0,  // continue read from socket
     CA_CLOSE        = 1,
@@ -47,6 +65,7 @@ typedef enum {
 void close_cb(uv_handle_t * handle)
 {
     client_t * client = (client_t *)handle;
+    before_loop_callback(client);
     update_log_prefix(client);
     LOGn("disconnected =================================");
     pipeline_close(client, false);
@@ -70,6 +89,7 @@ void close_connection(client_t * client)
 void shutdown_cb(uv_shutdown_t * req, int status)
 {
     uv_handle_t * client = (uv_handle_t *)req->handle;
+    before_loop_callback(client);
     update_log_prefix(client);
     LOGt("%s: status = %d", __func__, status);
     if (!uv_is_closing(client))
@@ -101,6 +121,7 @@ typedef struct {
 
 void x_write_cb(uv_write_t * req, int status)
 {
+    g_srv.num_writes--;
     free(req);
 }
 
@@ -121,6 +142,7 @@ int x_send_status(client_t * client, int status)
     wreq->buf.base = buf;
     LOGi("%s: \"%s\"", __func__, buf);
     uv_write((uv_write_t*)wreq, (uv_stream_t*)client, &wreq->buf, 1, x_write_cb);
+    g_srv.num_writes++;
     return 0;
 }
 
@@ -129,9 +151,12 @@ void write_cb(uv_write_t * req, int status)
     int close_conn = 0;
     write_req_t * wreq = (write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
+    g_srv.num_writes--;
+    before_loop_callback(client);
     update_log_prefix(client);
     if (status != 0) {
         LOGe("%s: Write error: %s", __func__, uv_strerror(status));
+        reset_response_preload(client);
         goto fin;
     }
     client->response.body_total_written += client->response.body_preloaded_size;
@@ -198,7 +223,7 @@ fin:
         reset_response_body(client);
         wreq->client = NULL;  // free write_req
         if (client->pipeline.status == PS_RESTING) {
-            uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+            stream_read_start(client);
         }
     }
     if (close_conn) {
@@ -243,6 +268,7 @@ int stream_write(client_t * client)
     LOGi("%s: %d bytes", __func__, total_len);
     wreq->client = client;
     uv_write((uv_write_t*)wreq, (uv_stream_t*)client, wreq->bufs, nbufs, write_cb);
+    g_srv.num_writes++;
     return CA_OK;
 }
 
@@ -293,7 +319,7 @@ int pipeline_close(client_t * client, bool start_reading)
     LOGi("%s: --------- %s", __func__, (g_srv.num_pipeline == 0) ? "LAST" : "");
     client->pipeline.status = PS_RESTING;
     if (start_reading) {
-        uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+        stream_read_start(client);
     }
     return 0;
 }
@@ -336,6 +362,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     int act = CA_OK;
     client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
+    before_loop_callback(client);
     update_log_prefix(client);
 
     if (nread == 0) {
@@ -542,6 +569,7 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 
 void connection_cb(uv_stream_t * server, int status)
 {
+    before_loop_callback(NULL);
     update_log_prefix(NULL);
     if (status < 0) {
         LOGe("Connection error %s\n", uv_strerror(status));
@@ -784,6 +812,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 
     int hr = init_srv();
     if (hr) {
+        LOGc("%s: critical error = %d", hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
     }
     return PyLong_FromLong(hr);

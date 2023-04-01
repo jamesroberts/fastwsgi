@@ -7,42 +7,31 @@
 
 PyObject* g_base_dict = NULL;
 
-typedef enum {
-    SH_LATIN1       = 0x01,
-    SH_CONCAT       = 0x02,
-    SH_COMMA_DELIM  = 0x04
-} set_header_flag_t;
-
 static
 int set_header(client_t * client, PyObject * key, const char * value, ssize_t length, int flags)
 {
-    PyObject * headers = client->request.headers;
+    int hr = 0;
     ssize_t vlen = (length >= 0) ? length : strlen(value);
-    LOGi("set_header: %s = '%.*s' %s", PyUnicode_AsUTF8(key), (int)vlen, value, (flags & SH_CONCAT) ? "(concat)" : "");
+    LOGi("set_header: %s = '%.*s'", PyUnicode_AsUTF8(key), (int)vlen, value);
+    PyObject * dict = NULL;
+    PyObject * kname = NULL;
     PyObject * val = NULL;
-    PyObject * setval = NULL;
-    if (flags & SH_LATIN1) {
-        val = PyUnicode_DecodeLatin1(value, vlen, NULL);
-    } else {
-        val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
-    }
-    if (!val)
-        return -3;
-
-    if (flags & SH_CONCAT) {  // concat PyUnicode value
-        PyObject * existing_val = PyDict_GetItem(headers, key);
-        if (existing_val) {
-            if (vlen == 0) {  // skip concat empty string
-                Py_XDECREF(val);
-                return 0;
-            }
-            setval = PyUnicode_Concat(existing_val, val);
+    {
+        dict = client->request.headers;
+        kname = key;
+        if (key == g_cv.PATH_INFO || key == g_cv.QUERY_STRING) {
+            val = PyUnicode_DecodeLatin1(value, vlen, NULL);
+        } else {
+            val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
         }
     }
-    PyDict_SetItem(headers, key, (setval != NULL) ? setval : val);
+    FIN_IF(!dict, -3);
+    FIN_IF(!kname, -4);
+    FIN_IF(!val, -5);
+    hr = PyDict_SetItem(dict, kname, val);
+fin:
     Py_XDECREF(val);
-    Py_XDECREF(setval);
-    return 0;
+    return hr;
 }
 
 static 
@@ -71,7 +60,6 @@ void close_iterator(PyObject * iterator)
     }
 }
 
-static
 void reset_head_buffer(client_t * client)
 {
     client->request.current_key_len = 0;
@@ -215,12 +203,13 @@ int on_header_field_complete(llhttp_t * parser)
     xbuf_t * buf = &client->head;
     char * data = buf->data;
     ssize_t size = buf->size;
-    if (size <= 5) {
+    ssize_t prefix_len = 5;  // prefix "HTTP_"
+    if (size <= prefix_len) {
         LOGi("%s: Unnamed field!", __func__);        
         goto fin;
     }
-    LOGi("%s: %s", __func__, data + 5);
-    for (ssize_t i = 5; i < size; i++) {
+    LOGi("%s: %s", __func__, data + prefix_len);
+    for (ssize_t i = prefix_len; i < size; i++) {
         const char symbol = data[i];
         if (symbol == '_') {  // CVE-2015-0219 
             xbuf_reset(buf);
@@ -267,6 +256,15 @@ int on_header_value(llhttp_t * parser, const char * data, size_t length)
     return 0;
 }
 
+typedef enum {
+    HN_UNKNOWN           = 0,
+    HN_CONTENT_LENGTH    = 1,
+    HN_CONTENT_TYPE      = 2,
+    HN_TRANSFER_ENCODING = 3,
+    HN_EXPECT            = 4,
+    HN__MAX
+} header_name_t;
+
 int on_header_value_complete(llhttp_t * parser)
 {
     client_t * client = (client_t *)parser->data;
@@ -276,18 +274,33 @@ int on_header_value_complete(llhttp_t * parser)
     char * key = buf->data;
     char * val = buf->data + key_len + 1;
     LOGi("%s: '%s'", __func__, val);
-    if (key_len <= 5) {
+    size_t prefix_len = 5;
+    if (key_len <= prefix_len) {
         LOGw("%s: Headers has an unnamed value!", __func__);        
         return 0;  // skip incorrect header
     }
-    if (key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0) {
+    header_name_t hname = HN_UNKNOWN;
+    {
+        if (key_len == 19 && strncmp(key, "HTTP_CONTENT_LENGTH", 19) == 0)
+            hname = HN_CONTENT_LENGTH;
+        else if (key_len == 17 && strncmp(key, "HTTP_CONTENT_TYPE", 17) == 0)
+            hname = HN_CONTENT_TYPE;
+        else if (key_len == 22 && strncmp(key, "HTTP_TRANSFER_ENCODING", 22) == 0)
+            hname = HN_TRANSFER_ENCODING;
+        else if (key_len == 11 && strncmp(key, "HTTP_EXPECT", 11) == 0)
+            hname = HN_EXPECT;
+    }
+    if (hname == HN_UNKNOWN) {
+        // nothing
+    }
+    else if (hname == HN_CONTENT_LENGTH) {
         client->request.http_content_length = 0; // field "Content-Length" present
-        key += 5;  // exclude prefix "HTTP_"
+        key += prefix_len;  // exclude prefix "HTTP_"
     }
-    if (key_len == 17 && strncmp(key, "HTTP_CONTENT_TYPE", 17) == 0) {
-        key += 5;  // exclude prefix "HTTP_"
+    else if (hname == HN_CONTENT_TYPE) {
+        key += prefix_len;  // exclude prefix "HTTP_"
     }
-    if (key_len == 22 && strncmp(key, "HTTP_TRANSFER_ENCODING", 22) == 0) {
+    else if (hname == HN_TRANSFER_ENCODING) {
         if (val_len == 7 && strncmp(val, "chunked", 7) == 0) {
             client->request.chunked = 1;
         } else {
@@ -301,7 +314,7 @@ int on_header_value_complete(llhttp_t * parser)
         // Let's skip the chunks flag, since the FastWSGI server completely downloads the body into memory
         // and immediately gives body to the WSGI application.
     }
-    if (key_len == 11 && strncmp(key, "HTTP_EXPECT", 11) == 0) {
+    else if (hname == HN_EXPECT) {
         if (val_len != 12 || strncmp(val, "100-continue", 12) != 0) {
             client->error = 1;
             LOGc("%s: Header \"Expect\" contain unsupported value = '%s'", __func__, val);
@@ -407,7 +420,6 @@ int on_message_complete(llhttp_t * parser)
     LOGi("%s", __func__);
     client_t * client = (client_t *)parser->data;
     client->request.load_state = LS_MSG_END;
-    PyObject * headers = client->request.headers;
 
     if (llhttp_should_keep_alive(parser)) {
         client->request.keep_alive = 1;
@@ -449,8 +461,9 @@ int on_message_complete(llhttp_t * parser)
             wsgi_input = client->request.wsgi_input_empty;
         }
     }
-    PyDict_SetItem(client->request.headers, g_cv.wsgi_input, wsgi_input); // wsgi_input: refcnt 1 -> 2
-
+    if (client->request.headers) {
+        PyDict_SetItem(client->request.headers, g_cv.wsgi_input, wsgi_input); // wsgi_input: refcnt 1 -> 2
+    }
     //LOGd("build_wsgi_environ");
     char buf[128];
     
@@ -587,7 +600,7 @@ int create_response(client_t * client)
 {
     int err = 0;
     LOGi("%s", __func__);
-    int flags = RF_HEADERS_PYLIST;
+    int flags = RF_HEADERS_WSGI;
     if (client->request.keep_alive)
         flags |= RF_SET_KEEP_ALIVE;
 
@@ -606,23 +619,21 @@ int create_response(client_t * client)
 
 int build_response(client_t * client, int flags, int status, const void * headers, const void * body_data, int _body_size)
 {
+    int hr = 0;
     xbuf_t * head = &client->head;
     reset_head_buffer(client);
     PyObject** body = client->response.body;
     StartResponse * response = NULL;
     int64_t body_size = _body_size;
-    int resp_date_present = 0;
+    bool resp_date_present = false;
 
-    if (flags & RF_HEADERS_PYLIST) {
+    if (flags & RF_HEADERS_WSGI) {
         response = (StartResponse *)headers;
         headers = NULL;
-    }
-    if (response) {
         char scode[4];
         Py_ssize_t status_len = 0;
         const char * status_code = PyUnicode_AsUTF8AndSize(response->status, &status_len);
-        if (status_len < 3)
-            return -2;
+        FIN_IF(status_len < 3, -2);
         memcpy(scode, status_code, 4);
         scode[3] = 0;
         status = atoi(scode);
@@ -633,8 +644,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     }
 
     const char * status_name = get_http_status_name(status);
-    if (!status_name)
-        return -3;
+    FIN_IF(!status_name, -3);
 
     char * buf = xbuf_expand(head, 128);
     head->size += sprintf(buf, "HTTP/1.1 %d %s\r\n", status, status_name);
@@ -642,10 +652,15 @@ int build_response(client_t * client, int flags, int status, const void * header
     if (response) {
         Py_ssize_t hsize = PyList_GET_SIZE(response->headers);
         for (Py_ssize_t i = 0; i < hsize; i++) {
-            PyObject* tuple = PyList_GET_ITEM(response->headers, i);
-
+            const char * key;
             Py_ssize_t key_len = 0;
-            const char * key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
+            const char * val;
+            Py_ssize_t val_len = 0;
+            {
+                PyObject * tuple = PyList_GET_ITEM(response->headers, i);
+                key = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 0), &key_len);
+                val = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &val_len);
+            }
 
             if (key_len == 14 && key[7] == '-')
                 if (strcasecmp(key, "Content-Length") == 0)
@@ -657,17 +672,14 @@ int build_response(client_t * client, int flags, int status, const void * header
 
             if (key_len == 4)
                 if (strcasecmp(key, "Date") == 0)
-                    resp_date_present = 1;
-
-            Py_ssize_t value_len = 0;
-            const char * value = PyUnicode_AsUTF8AndSize(PyTuple_GET_ITEM(tuple, 1), &value_len);
+                    resp_date_present = true;
 
             xbuf_add(head, key, key_len);
             xbuf_add(head, ": ", 2);
-            xbuf_add(head, value, value_len);
+            xbuf_add(head, val, val_len);
             xbuf_add(head, "\r\n", 2);
 
-            LOGi("added header '%s: %s'", key, value);
+            LOGi("added header '%s: %s'", key, val);
         }
     }
     else if (headers) {
@@ -703,7 +715,7 @@ int build_response(client_t * client, int flags, int status, const void * header
             return -7;  // critical error
         char * buf = xbuf_expand(head, 48);
         head->size += sprintf(buf, "%X\r\n", (int)client->response.body_preloaded_size);
-        goto fin;
+        FIN(0);
     }
 
     if (body_size == 0) {
@@ -730,8 +742,12 @@ end:
         LOGi("Added Header 'Content-Length: %lld'", (long long)body_size);
     }
     xbuf_add(head, "\r\n", 2);  // end of headers
+    hr = 0;
 
 fin:
+    if (hr < 0) {
+        return hr;
+    }
     LOGt(head->data);
     LOGt_IF(body_size > 0 && client->response.body_chunk_num, PyBytes_AS_STRING(body[0]));
     client->response.headers_size = head->size;
@@ -936,7 +952,7 @@ void init_request_dict()
     PyDict_SetItem(g_base_dict, g_cv.SERVER_NAME, host);
     PyDict_SetItem(g_base_dict, g_cv.SERVER_PORT, port);
     //PyDict_SetItem(g_base_dict, g_cv.wsgi_input, io_BytesIO);   // not const!!!
-    PyDict_SetItem(g_base_dict, g_cv.wsgi_version, g_cv.version);
+    PyDict_SetItem(g_base_dict, g_cv.wsgi_version, g_cv.wsgi_ver_1_0);
     PyDict_SetItem(g_base_dict, g_cv.wsgi_url_scheme, g_cv.http_scheme);
     PyDict_SetItem(g_base_dict, g_cv.wsgi_errors, PySys_GetObject("stderr"));
     PyDict_SetItem(g_base_dict, g_cv.wsgi_run_once, Py_False);
