@@ -623,6 +623,7 @@ int init_srv()
     configure_parser_settings(&g_srv.parser_settings);
     init_constants();
     init_request_dict();
+    PyType_Ready(&StartResponse_Type);
 
     sockaddr_t addr;
     int tcp_flags = 0;

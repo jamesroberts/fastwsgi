@@ -4,11 +4,11 @@
 #include "common.h"
 
 typedef struct {
-    PyObject ob_base;
-    PyObject* status;
-    PyObject* headers;
-    PyObject* exc_info;
-    int called;
+    PyObject   ob_base;
+    PyObject * status;
+    PyObject * headers;
+    PyObject * exc_info;
+    int        called;
 } StartResponse;
 
 extern PyTypeObject StartResponse_Type;
@@ -16,12 +16,14 @@ extern PyTypeObject StartResponse_Type;
 INLINE
 static StartResponse * create_start_response(void)
 {
-    StartResponse * response = PyObject_NEW(StartResponse, &StartResponse_Type);
-    response->status = NULL;
-    response->headers = NULL;
-    response->exc_info = NULL;
-    response->called = 0;
-    return response;
+    StartResponse * sr = PyObject_NEW(StartResponse, &StartResponse_Type);
+    if (sr) {
+        sr->status = NULL;
+        sr->headers = NULL;
+        sr->exc_info = NULL;
+        sr->called = 0;
+    }
+    return sr;
 }
 
 void set_status_error();
