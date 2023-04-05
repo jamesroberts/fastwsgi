@@ -17,17 +17,26 @@ fin:
     return (hr == 0) ? true : false;
 }
 
+int64_t g_idle_num = 0;
+
 PyObject * uni_loop(PyObject * self, PyObject * not_used)
 {
+    bool relax = false;
     PyObject * res = NULL;
 
-    //uv_sleep(1);  // FIXME
     g_srv.num_loop_cb = 0;  // reset cb counter
-    uv_run(g_srv.loop, UV_RUN_NOWAIT);
-    
-    // check  g_srv.num_loop_cb  &&  g_srv.num_writes
 
-    if (1) {
+    uv_run(g_srv.loop, UV_RUN_NOWAIT);
+
+    if (g_srv.num_loop_cb == 0 && g_srv.num_writes == 0) {
+        g_idle_num++;
+    } else {
+        g_idle_num = 0;
+    }
+    if (g_idle_num > 10) {
+        relax = true;
+    }
+    if (relax == false) {
         res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_soon, g_srv.aio.uni_loop, NULL);
     } else {
         res = PyObject_CallFunctionObjArgs(g_srv.aio.loop.call_later, g_cv.f0_001, g_srv.aio.uni_loop, NULL);
