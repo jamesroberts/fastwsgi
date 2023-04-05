@@ -137,6 +137,7 @@ int x_send_status(client_t * client, int status);
 int stream_write(client_t * client);
 int stream_read_start(client_t * client);
 int stream_read_stop(client_t * client);
+void close_connection(client_t * client);
 
 // ----------- functions from request.c ----------------------------
 

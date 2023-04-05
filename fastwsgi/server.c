@@ -40,18 +40,19 @@ void free_read_buffer(client_t * client, void * data)
 
 int stream_read_start(client_t * client)
 {
-    if (client->response.write_req.client)
-        return -1;
-
-    if (client->pipeline.status >= PS_ACTIVE)
-        return -1;
-
+    int hr = 0;
+    FIN_IF(client->response.write_req.client, -1);     // writes is active
+    FIN_IF(client->pipeline.status >= PS_ACTIVE, -2);  // read from pipeline master buffer
     uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
-    return 0;
+    LOGd("%s: READ ACTIVATED", __func__);
+fin:
+    LOGd_IF(hr, "%s: read not activated (err == %d)", __func__, hr);
+    return hr;
 }
 
 int stream_read_stop(client_t * client)
 {
+    LOGd("%s: READ STOPPED", __func__);
     uv_read_stop((uv_stream_t *)client);
     return 0;
 }
@@ -83,18 +84,18 @@ void close_cb(uv_handle_t * handle)
 
 void close_connection(client_t * client)
 {
+    LOGd("%s: ....", __func__);
     if (!uv_is_closing((uv_handle_t*)client))
         uv_close((uv_handle_t*)client, close_cb);
 }
 
 void shutdown_cb(uv_shutdown_t * req, int status)
 {
-    uv_handle_t * client = (uv_handle_t *)req->handle;
+    client_t * client = (client_t *)req->handle;
     before_loop_callback(client);
     update_log_prefix(client);
     LOGt("%s: status = %d", __func__, status);
-    if (!uv_is_closing(client))
-        uv_close(client, close_cb);
+    close_connection(client);
     free(req);
 }
 
@@ -287,7 +288,7 @@ int stream_write(client_t * client)
         nbufs++;
         total_len += 2;
     }
-    uv_read_stop((uv_stream_t*)client);
+    stream_read_stop(client);
     LOGi("%s: %d bytes", __func__, total_len);
     wreq->client = client;
     uv_write((uv_write_t*)wreq, (uv_stream_t*)client, wreq->bufs, nbufs, write_cb);
@@ -443,7 +444,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
                 LOGd("%s: pos = %p (%d + %d = %d)", __func__, pos, (int)s1, (int)s2, (int)(s1+s2));
             }
             client->pipeline.buf_pos = pos;
-            uv_read_stop(handle);
+            stream_read_stop(client);
         }
         error = HPE_OK;
     }
@@ -493,7 +494,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     if (client->asgi) {
         err = asgi_call_app(client);
         if (!err)
-            uv_read_stop(handle);
+            stream_read_stop(client);
         goto fin;
     }
     err = call_wsgi_app(client);
@@ -533,12 +534,12 @@ fin:
         client->request.load_state = LS_WAIT;
     }
     if (act == CA_SHUTDOWN) {
-        uv_read_stop(handle);
+        stream_read_stop(client);
         shutdown_connection(client);
         return;
     }
     if (act == CA_CLOSE) {
-        uv_read_stop(handle);
+        stream_read_stop(client);
         close_connection(client);
         return;
     }
@@ -652,7 +653,7 @@ void connection_cb(uv_stream_t * server, int status)
     LOGn("connected =================================");
     llhttp_init(&client->request.parser, HTTP_REQUEST, &g_srv.parser_settings);
     client->request.parser.data = client;
-    uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
+    stream_read_start(client);
 }
 
 void signal_handler(uv_signal_t * req, int signum)

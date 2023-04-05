@@ -187,10 +187,11 @@ fin:
 int asgi_free(void * _client)
 {
     client_t * client = (client_t *)_client;
-    PyObject * asgi = (PyObject *)client->asgi;
+    asgi_t * asgi = client->asgi;
     if (asgi) {
-        LOGd("%s: RefCnt(asgi) = %d", __func__, (int)Py_REFCNT(asgi));
-        Py_CLEAR(asgi);
+        asgi->client = NULL;
+        LOGd("%s: RefCnt(asgi) = %d, RefCnt(task) = %d", __func__, (int)Py_REFCNT(asgi), asgi->task ? (int)Py_REFCNT(asgi->task) : -333);
+        Py_DECREF(asgi);
     }
     client->asgi = NULL;
     return 0;
@@ -572,12 +573,10 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
         FIN_IF(!future, -4570601);
         asgi->send.future = future;
         Py_INCREF(future);
+        FIN(0);
     }
-    else {
-        LOGe("%s: unsupported event type: '%s' ", __func__, evt_type);
-        FIN(-4570901);
-    }
-    hr = 0;
+    LOGe("%s: unsupported event type: '%s' ", __func__, evt_type);
+    hr = -4570901;
 fin:
     if (hr) {
         LOGe("%s: FIN WITH error = %d", hr);
@@ -593,13 +592,23 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
     int hr = 0;
     asgi_t * asgi = (asgi_t *)self;
     client_t * client = asgi->client;
-
+    PyObject * res = NULL;
     update_log_prefix(client);
 
-    LOGi("%s: RefCnt(asgi) = %d", __func__, (int)Py_REFCNT(self));
-    client->asgi = NULL;
+    res = PyObject_CallMethodObjArgs(future, g_cv.result, NULL);
+    if (res == NULL) {
+        LOGe("%s: Exception detected", __func__);
+    } else {
+        LOGd("%s: result type = %s", __func__, Py_TYPE(res)->tp_name);
+    }
+    LOGd("%s: RefCnt(asgi) = %d", __func__, (int)Py_REFCNT(self));
     hr = 0;
 //fin:
+    if (client) {
+        client->asgi = NULL;
+        stream_read_start(client);
+    }
+    Py_XDECREF(res);
     Py_RETURN_NONE;
 }
 
@@ -612,7 +621,6 @@ PyObject * asgi_await(PyObject * self)
 void asgi_dealloc(asgi_t * self)
 {
     asgi_t * asgi = (asgi_t *)self;
-    stream_read_start(asgi->client);
     LOGd("%s: RefCnt(asgi) = %d, RefCnt(task) = %d,", __func__, (int)Py_REFCNT(self), self->task ? (int)Py_REFCNT(self->task) : -999);
     Py_CLEAR(self->scope);
     Py_CLEAR(self->recv.future);
