@@ -142,9 +142,15 @@ def run_from_cli(host, port, wsgi_app_import_string, loglevel):
 
 # -------------------------------------------------------------------------------------
 
-def run(wsgi_app, host = None, port = None, loglevel = None, workers = None):
+def run(app = None, host = None, port = None, loglevel = None, workers = None, wsgi_app = None):
+    if app and wsgi_app:
+        raise Exception("It is not allowed to specify several applications at once.")
+    if app is None:
+        app = wsgi_app
+    if app is None:
+        raise Exception("app not specify.")
     print("FastWSGI server running on PID:", os.getpid())
-    server.init(wsgi_app, host, port, loglevel, workers)
+    server.init(app, host, port, loglevel, workers)
     addon = " multiple workers" if server.num_workers > 1 else ""
     print(f"FastWSGI server{addon} listening at http://{server.host}:{server.port}")
     server.run()
