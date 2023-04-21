@@ -85,6 +85,7 @@ typedef struct {
     PyObject* set_result;  // "set_result"
     PyObject* set_exception;  // "set_exception"
 
+    PyObject* http_delim;  // b"\r\n"
     PyObject* footer_last_chunk;  // b"\r\n0\r\n\r\n"
 } cvar_t;
 

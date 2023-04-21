@@ -36,6 +36,7 @@ int set_header(client_t * client, PyObject * key, const char * value, ssize_t le
         }
         else if (key == g_cv.REQUEST_METHOD) {
             kname = g_cv.method;
+            val = PyUnicode_FromStringAndSize(value, vlen);  // as UTF-8
         }
         else if (key == g_cv.SERVER_PROTOCOL) {
             kname = g_cv.http_version;

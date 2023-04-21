@@ -36,6 +36,7 @@ typedef struct {
     PyObject * scope;  // PyDict
     struct {
         PyObject * future;
+        bool       completed;
     } recv;
     struct {
         PyObject * future;
@@ -91,6 +92,10 @@ Py_ssize_t asgi_get_data_from_header(PyObject * object, size_t index, const char
         if (PyBytes_Check(item)) {
             *data = PyBytes_AS_STRING(item);
             return PyBytes_GET_SIZE(item);
+        }
+        if (PyUnicode_Check(item)) {
+            *data = PyUnicode_DATA(item);
+            return PyUnicode_GET_LENGTH(item);
         }
     }
     return -39004;

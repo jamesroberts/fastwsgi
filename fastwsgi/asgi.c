@@ -157,6 +157,8 @@ void create_asgi_scope(void)
         PyDict_SetItem(scope_asgi, g_cv.spec_version, g_cv.v2_0);
         g_scope = PyDict_New();
         PyDict_SetItem(g_scope, g_cv.type, g_cv.http);
+        PyDict_SetItem(g_scope, g_cv.scheme, g_cv.http);
+        PyDict_SetItem(g_scope, g_cv.query_string, g_cv.empty_bytes);
         PyDict_SetItem(g_scope, g_cv.asgi, scope_asgi);
         Py_DECREF(scope_asgi);
         //PyDict_SetItem(g_scope, g_cv.server, g_cv.empty_string); // FIXME
@@ -283,6 +285,7 @@ int asgi_get_info_from_response(client_t * client, PyObject * dict)
     }
     hr = 0;
 fin:
+    LOGc_IF(hr, "%s: error = %d", __func__, hr);
     Py_XDECREF(item);
     Py_XDECREF(iterator);
     return hr;
@@ -417,7 +420,12 @@ PyObject * asgi_receive(PyObject * self, PyObject * notused)
     
     update_log_prefix(client);
     LOGt("%s: ....", __func__);
-
+    if (asgi->recv.completed) {
+        future = PyObject_CallObject(g_srv.aio.loop.create_future, NULL);
+        asgi->recv.future = future;
+        Py_INCREF(future);
+        FIN(0);
+    }
     dict = PyDict_New();
     int rc = PyDict_SetItem(dict, g_cv.type, g_cv.http_request);
     FIN_IF(rc, -4560715);
@@ -440,6 +448,7 @@ PyObject * asgi_receive(PyObject * self, PyObject * notused)
 
     int err = asgi_future_set_result_soon(client, future, dict);
     FIN_IF(err, -4560775);
+    asgi->recv.completed = true;
 
     LOGd("%s: recv size = %d", __func__, input_size);
     hr = 0;
@@ -541,16 +550,18 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
                 FIN(0);
             }
             if (body_size > 0) {
-                Py_INCREF(body);  // Reasone: "body" inserted into body chunks array
+                Py_INCREF(body);  // Reason: "body" inserted into body chunks array
                 client->response.body[client->response.body_chunk_num++] = body;
                 client->response.body_preloaded_size += body_size;
                 LOGd("%s: added chunk, size = %d", __func__, (int)body_size);
             }
             if (latest_body) {
                 client->response.chunked = 2;
-                client->response.body[client->response.body_chunk_num++] = g_cv.footer_last_chunk;
-                Py_INCREF(g_cv.footer_last_chunk);  // Reasone: "footer_last_chunk" inserted into body chunks array
-                //client->response.body_preloaded_size += PyBytes_GET_SIZE(g_cv.footer_last_chunk);
+                if (body_size > 0) {
+                    client->response.body[client->response.body_chunk_num++] = g_cv.footer_last_chunk;
+                    Py_INCREF(g_cv.footer_last_chunk);  // Reason: "footer_last_chunk" inserted into body chunks array
+                    //client->response.body_preloaded_size += PyBytes_GET_SIZE(g_cv.footer_last_chunk);
+                }
             }
         }
         if (asgi->send.start_response) {
@@ -563,7 +574,11 @@ PyObject * asgi_send(PyObject * self, PyObject * dict)
             int csize = (int)client->response.body_preloaded_size;
             xbuf_reset(&client->head);
             char * buf = xbuf_expand(&client->head, 48);
-            client->head.size += sprintf(buf, "%X\r\n", csize);
+            if (csize > 0) {
+                client->head.size += sprintf(buf, "%X\r\n", csize);
+            } else {
+                client->head.size += sprintf(buf, "0\r\n\r\n");
+            }
             client->response.headers_size = client->head.size;
             LOGd("%s: added chunk prefix, size = %d ", __func__, csize);
         }        
@@ -598,6 +613,7 @@ PyObject * asgi_done(PyObject * self, PyObject * future)
     res = PyObject_CallMethodObjArgs(future, g_cv.result, NULL);
     if (res == NULL) {
         LOGe("%s: Exception detected", __func__);
+        PyErr_Clear();
     } else {
         LOGd("%s: result type = %s", __func__, Py_TYPE(res)->tp_name);
     }

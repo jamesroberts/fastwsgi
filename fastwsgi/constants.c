@@ -77,7 +77,7 @@ void init_constants()
     g_cv.v2_0 = PyUnicode_FromString("2.0");
     g_cv.http = PyUnicode_FromString("http");
     g_cv.https = PyUnicode_FromString("https");
-    g_cv.http_request = PyUnicode_FromString("https");
+    g_cv.http_request = PyUnicode_FromString("http.request");
     g_cv.status = PyUnicode_FromString("status");
 
     g_cv.ContentLength = PyBytes_FromString("Content-Length");
@@ -90,5 +90,6 @@ void init_constants()
     g_cv.set_result = PyUnicode_FromString("set_result");
     g_cv.set_exception = PyUnicode_FromString("set_exception");
 
+    g_cv.http_delim = PyBytes_FromString("\r\n");
     g_cv.footer_last_chunk = PyBytes_FromString("\r\n0\r\n\r\n");
 }
