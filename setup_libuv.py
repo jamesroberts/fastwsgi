@@ -2,7 +2,6 @@
 import os
 import sys
 import glob
-from distutils.command.build_ext import build_ext
 
 SOURCES = glob.glob('libuv/src/*.c')
 
@@ -81,13 +80,10 @@ elif sys.platform.startswith('sunos'):
     ]
 
 
-class build_libuv(build_ext):
-    libuv_dir = os.path.join('libuv')
-
-    def initialize_options(self):
-        build_ext.initialize_options(self)
-
-    def build_extensions(self):
+def build_libuv(build_ext):
+    self = build_ext
+    self.libuv_dir = os.path.join('libuv')
+    if True:
         self.compiler.add_include_dir(os.path.join(self.libuv_dir, 'include'))
         self.compiler.add_include_dir(os.path.join(self.libuv_dir, 'src'))
         self.extensions[0].sources += SOURCES
@@ -125,5 +121,3 @@ class build_libuv(build_ext):
             self.compiler.add_library('userenv')
             self.compiler.add_library('ws2_32')
             self.compiler.add_library('secur32')
-
-        build_ext.build_extensions(self)

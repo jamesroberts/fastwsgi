@@ -1,19 +1,41 @@
+import os
 import glob
 from setuptools import setup
 from distutils.core import Extension
-from setup_libuv import build_libuv
+from distutils.command.build_ext import build_ext
+import setup_libuv
 
 SOURCES = glob.glob("fastwsgi/*.c") + glob.glob("llhttp/src/*.c")
-
-ext_compile_args = [ "-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall" ]
-ext_compile_args += [ "-Wno-unused-function", "-Wno-unused-variable" ]
 
 module = Extension(
     "_fastwsgi",
     sources=SOURCES,
     include_dirs=["llhttp/include", "libuv/include"],
-    extra_compile_args=ext_compile_args
 )
+
+class build_all(build_ext):
+    def initialize_options(self):
+        build_ext.initialize_options(self)
+
+    def build_extensions(self):
+        global module
+
+        setup_libuv.build_libuv(self)
+
+        compiler = self.compiler.compiler_type
+        print("Current compiler:", compiler)
+
+        for ext in self.extensions:
+            if ext == module:
+                if compiler == 'msvc':
+                    ext.extra_compile_args = [ '/Oi', '/Oy-', '/W3', '/WX-', '/Gd', '/GS' ]
+                    ext.extra_compile_args += [ '/Zc:forScope', '/Zc:inline', '/fp:precise', '/analyze-' ]
+                else:
+                    ext.extra_compile_args = [ "-O3", "-fno-strict-aliasing", "-fcommon", "-g", "-Wall" ]
+                    ext.extra_compile_args += [ "-Wno-unused-function", "-Wno-unused-variable" ]
+        
+        build_ext.build_extensions(self)
+
 
 with open("README.md", "r", encoding="utf-8") as read_me:
     long_description = read_me.read()
@@ -43,7 +65,7 @@ setup(
     ],
     python_requires=">=3.6",
     install_requires=["click>=7.0"],
-    cmdclass={"build_ext": build_libuv},
+    cmdclass={"build_ext": build_all},
     entry_points={
         "console_scripts": [
             "fastwsgi = fastwsgi:run_from_cli",
