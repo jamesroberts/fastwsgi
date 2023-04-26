@@ -708,6 +708,7 @@ int build_response(client_t * client, int flags, int status, const void * header
     PyObject * asgi_dict = NULL;
     int64_t body_size = _body_size;
     bool resp_date_present = false;
+    bool resp_server_present = false;
 
     if (flags & RF_HEADERS_WSGI) {
         response = (StartResponse *)headers;
@@ -792,8 +793,19 @@ int build_response(client_t * client, int flags, int status, const void * header
                 if (strcasecmp(key, "Date") == 0)
                     resp_date_present = true;
 
+            bool is_header_server = false;
+            if (key_len == 6)
+                if (strcasecmp(key, "Server") == 0) {
+                    is_header_server = true;
+                    resp_server_present = true;
+                }
+
             xbuf_add(head, key, key_len);
             xbuf_add(head, ": ", 2);
+            if (is_header_server && g_srv.add_header_server > 0) {
+                xbuf_add(head, g_srv.header_server, g_srv.add_header_server);
+                xbuf_add(head, " ", 1);
+            }
             xbuf_add(head, val, val_len);
             xbuf_add(head, "\r\n", 2);
 
@@ -807,11 +819,16 @@ int build_response(client_t * client, int flags, int status, const void * header
         xbuf_add_str(head, (const char *)headers);
     }
 
-    if (!resp_date_present) {
+    if (!resp_date_present && g_srv.add_header_date) {
         char * date_str;
         int date_len = get_asctime(&date_str);
         xbuf_add(head, "Date: ", 6);
         xbuf_add(head, date_str, date_len);
+        xbuf_add(head, "\r\n", 2);
+    }
+    if (!resp_server_present && g_srv.add_header_server > 0) {
+        xbuf_add(head, "Server: ", 8);
+        xbuf_add(head, g_srv.header_server, g_srv.add_header_server);
         xbuf_add(head, "\r\n", 2);
     }
 

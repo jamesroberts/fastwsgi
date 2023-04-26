@@ -815,6 +815,14 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     rv = get_obj_attr_int(server, "allow_keepalive");
     g_srv.allow_keepalive = (rv == 0) ? 0 : 1;
 
+    rv = get_obj_attr_int(server, "add_header_date");
+    g_srv.add_header_date = (rv == 0) ? 0 : 1;
+
+    const char * srvname = get_obj_attr_str(server, "add_header_server");
+    if (srvname && srvname[0]) {
+        strncpy(g_srv.header_server, srvname, sizeof(g_srv.header_server) - 1);
+        g_srv.add_header_server = (int)strlen(g_srv.header_server);
+    }
     rv = get_obj_attr_int(server, "max_content_length");
     if (rv == LLONG_MIN) {
         rv = get_env_int("FASTWSGI_MAX_CONTENT_LENGTH");

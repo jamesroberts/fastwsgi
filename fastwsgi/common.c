@@ -47,12 +47,16 @@ int64_t get_env_int(const char * name)
 
 int64_t get_obj_attr_int(PyObject * obj, const char * name)
 {
+    int64_t hr = 0;
     PyObject * attr = PyObject_GetAttrString(obj, name);
+    FIN_IF(!attr, LLONG_MIN);  // error
+    FIN_IF(attr == Py_True, 1);
+    FIN_IF(attr == Py_False, 0);
+    FIN_IF(!PyLong_CheckExact(attr), LLONG_MIN);
+    hr = PyLong_AsSsize_t(attr);
+fin:
     Py_XDECREF(attr);
-    if (!attr || !PyLong_CheckExact(attr)) {
-        return LLONG_MIN;
-    }    
-    return PyLong_AsSsize_t(attr);
+    return hr;
 }
 
 const char * get_obj_attr_str(PyObject * obj, const char * name)

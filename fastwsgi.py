@@ -6,6 +6,8 @@ import click
 import _fastwsgi
 from pkg_resources import get_distribution
 
+__version__ = get_distribution("fastwsgi").version
+
 LL_DISABLED    = 0
 LL_FATAL_ERROR = 1
 LL_CRIT_ERROR  = 2
@@ -21,10 +23,12 @@ class _Server():
         self.app = None
         self.host = "0.0.0.0"
         self.port = 5000
-        self.backlog = 1024
+        self.backlog = 2048
         self.loglevel = LL_ERROR
-        self.hook_sigint = 2
-        self.allow_keepalive = 1
+        self.hook_sigint = 2            # 0 = ignore Ctrl-C; 1 = stop server on Ctrl-C; 2 = halt process on Ctrl-C
+        self.allow_keepalive = True
+        self.add_header_date = True
+        self.add_header_server = "FastWSGI/{}".format(__version__)
         self.max_content_length = None  # def value: 999999999
         self.max_chunk_size = None      # def value: 256 KiB
         self.read_buffer_size = None    # def value: 64 KiB
