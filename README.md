@@ -105,6 +105,13 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 Please make sure to update tests where appropriate.
 
 
+## Significant Contributions
+
+Special thank you to the following individuals who have made significant contributions to FastWSGI:
+
+- Oleg S. ([@remittor](https://github.com/remittor))
+
+
 ## TODO
 
 - Comprehensive error handling
