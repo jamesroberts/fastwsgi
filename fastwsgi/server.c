@@ -38,6 +38,25 @@ void free_read_buffer(client_t * client, void * data)
     }
 }
 
+int stream_read_start(client_t * client)
+{
+    int hr = 0;
+    FIN_IF(client->response.write_req.client, -1);     // writes is active
+    FIN_IF(client->pipeline.status >= PS_ACTIVE, -2);  // read from pipeline master buffer
+    uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+    LOGd("%s: READ ACTIVATED", __func__);
+fin:
+    LOGd_IF(hr, "%s: read not activated (err == %d)", __func__, hr);
+    return hr;
+}
+
+int stream_read_stop(client_t * client)
+{
+    LOGd("%s: READ STOPPED", __func__);
+    uv_read_stop((uv_stream_t *)client);
+    return 0;
+}
+
 typedef enum {
     CA_OK           = 0,  // continue read from socket
     CA_CLOSE        = 1,
@@ -47,6 +66,7 @@ typedef enum {
 void close_cb(uv_handle_t * handle)
 {
     client_t * client = (client_t *)handle;
+    before_loop_callback(client);
     update_log_prefix(client);
     LOGn("disconnected =================================");
     pipeline_close(client, false);
@@ -57,23 +77,25 @@ void close_cb(uv_handle_t * handle)
     free_start_response(client);
     reset_response_body(client);
     free_read_buffer(client, NULL);
+    asgi_free(client);
     free(client);
     update_log_prefix(NULL);
 }
 
 void close_connection(client_t * client)
 {
+    LOGd("%s: ....", __func__);
     if (!uv_is_closing((uv_handle_t*)client))
         uv_close((uv_handle_t*)client, close_cb);
 }
 
 void shutdown_cb(uv_shutdown_t * req, int status)
 {
-    uv_handle_t * client = (uv_handle_t *)req->handle;
+    client_t * client = (client_t *)req->handle;
+    before_loop_callback(client);
     update_log_prefix(client);
     LOGt("%s: status = %d", __func__, status);
-    if (!uv_is_closing(client))
-        uv_close(client, close_cb);
+    close_connection(client);
     free(req);
 }
 
@@ -101,6 +123,7 @@ typedef struct {
 
 void x_write_cb(uv_write_t * req, int status)
 {
+    g_srv.num_writes--;
     free(req);
 }
 
@@ -121,6 +144,7 @@ int x_send_status(client_t * client, int status)
     wreq->buf.base = buf;
     LOGi("%s: \"%s\"", __func__, buf);
     uv_write((uv_write_t*)wreq, (uv_stream_t*)client, &wreq->buf, 1, x_write_cb);
+    g_srv.num_writes++;
     return 0;
 }
 
@@ -129,9 +153,12 @@ void write_cb(uv_write_t * req, int status)
     int close_conn = 0;
     write_req_t * wreq = (write_req_t*)req;
     client_t * client = (client_t *)wreq->client;
+    g_srv.num_writes--;
+    before_loop_callback(client);
     update_log_prefix(client);
     if (status != 0) {
         LOGe("%s: Write error: %s", __func__, uv_strerror(status));
+        reset_response_preload(client);
         goto fin;
     }
     client->response.body_total_written += client->response.body_preloaded_size;
@@ -151,6 +178,9 @@ void write_cb(uv_write_t * req, int status)
             LOGd("%s: Response body is completely streamed. body_total_size = %lld", __func__, (long long)body_total_size);
             goto fin;
         }
+    }
+    if (client->asgi) {
+        goto fin;
     }
     client->error = 0;
     PyObject * chunk = wsgi_iterator_get_next_chunk(client, 0);
@@ -194,11 +224,30 @@ fin:
     if (!client->request.keep_alive || !client->srv->allow_keepalive) {
         close_conn = 1;
     }
+    if (client->asgi) {
+        reset_head_buffer(client);
+        if (status < 0) {
+            // cancel await current app.send()
+            asgi_future_set_exception(client, &client->asgi->send.future, "Write error: %d", status);
+        }
+        else {
+            PyObject * result = Py_True;
+            Py_INCREF(result);
+            // complete await current app.send()
+            int err = asgi_future_set_result(client, &client->asgi->send.future, result);
+        }        
+        if (client->asgi->send.latest_chunk) {
+            LOGd("%s: ASGI last chunk sended!", __func__);
+        } else {
+            return;  // continue sending chunks 
+        }
+    }
     if (!close_conn) {
         reset_response_body(client);
         wreq->client = NULL;  // free write_req
         if (client->pipeline.status == PS_RESTING) {
-            uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+            if (!client->asgi)
+                stream_read_start(client);
         }
     }
     if (close_conn) {
@@ -239,10 +288,11 @@ int stream_write(client_t * client)
         nbufs++;
         total_len += 2;
     }
-    uv_read_stop((uv_stream_t*)client);
+    stream_read_stop(client);
     LOGi("%s: %d bytes", __func__, total_len);
     wreq->client = client;
     uv_write((uv_write_t*)wreq, (uv_stream_t*)client, wreq->bufs, nbufs, write_cb);
+    g_srv.num_writes++;
     return CA_OK;
 }
 
@@ -293,7 +343,7 @@ int pipeline_close(client_t * client, bool start_reading)
     LOGi("%s: --------- %s", __func__, (g_srv.num_pipeline == 0) ? "LAST" : "");
     client->pipeline.status = PS_RESTING;
     if (start_reading) {
-        uv_read_start((uv_stream_t *)client, alloc_cb, read_cb);
+        stream_read_start(client);
     }
     return 0;
 }
@@ -336,6 +386,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
     int act = CA_OK;
     client_t * client = (client_t *)handle;
     llhttp_t * parser = &client->request.parser;
+    before_loop_callback(client);
     update_log_prefix(client);
 
     if (nread == 0) {
@@ -393,7 +444,7 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
                 LOGd("%s: pos = %p (%d + %d = %d)", __func__, pos, (int)s1, (int)s2, (int)(s1+s2));
             }
             client->pipeline.buf_pos = pos;
-            uv_read_stop(handle);
+            stream_read_stop(client);
         }
         error = HPE_OK;
     }
@@ -440,6 +491,12 @@ void read_cb(uv_stream_t * handle, ssize_t nread, const uv_buf_t * buf)
         goto fin;
     }
     LOGd("HTTP request successfully parsed (wsgi_input_size = %lld)", (long long)client->request.wsgi_input_size);
+    if (client->asgi) {
+        err = asgi_call_app(client);
+        if (!err)
+            stream_read_stop(client);
+        goto fin;
+    }
     err = call_wsgi_app(client);
     if (err) {
         goto fin;
@@ -477,12 +534,12 @@ fin:
         client->request.load_state = LS_WAIT;
     }
     if (act == CA_SHUTDOWN) {
-        uv_read_stop(handle);
+        stream_read_stop(client);
         shutdown_connection(client);
         return;
     }
     if (act == CA_CLOSE) {
-        uv_read_stop(handle);
+        stream_read_stop(client);
         close_connection(client);
         return;
     }
@@ -542,6 +599,7 @@ void alloc_cb(uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf)
 
 void connection_cb(uv_stream_t * server, int status)
 {
+    before_loop_callback(NULL);
     update_log_prefix(NULL);
     if (status < 0) {
         LOGe("Connection error %s\n", uv_strerror(status));
@@ -595,7 +653,7 @@ void connection_cb(uv_stream_t * server, int status)
     LOGn("connected =================================");
     llhttp_init(&client->request.parser, HTTP_REQUEST, &g_srv.parser_settings);
     client->request.parser.data = client;
-    uv_read_start((uv_stream_t*)&client->handle, alloc_cb, read_cb);
+    stream_read_start(client);
 }
 
 void signal_handler(uv_signal_t * req, int signum)
@@ -624,6 +682,11 @@ int init_srv()
     init_constants();
     init_request_dict();
     PyType_Ready(&StartResponse_Type);
+    if (g_srv.asgi_app) {
+        PyType_Ready(&ASGI_Type);
+        hr = asyncio_init(&g_srv.aio);
+        FIN_IF(hr, hr);
+    }
 
     sockaddr_t addr;
     int tcp_flags = 0;
@@ -684,6 +747,9 @@ fin:
         if (g_srv.loop)
             uv_loop_close(g_srv.loop);
 
+        if (g_srv.aio.asyncio)
+            asyncio_free(&g_srv.aio, false);
+
         memset(&g_srv, 0, sizeof(g_srv));
     }    
     return hr;
@@ -708,13 +774,19 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
     }
     set_log_level((int)loglevel);
 
-    g_srv.wsgi_app = PyObject_GetAttrString(server, "app");
-    Py_XDECREF(g_srv.wsgi_app);
-    if (!g_srv.wsgi_app) {
+    PyObject * app = PyObject_GetAttrString(server, "app");
+    Py_XDECREF(app);
+    if (!app) {
         PyErr_Format(PyExc_ValueError, "Option app not defined");
         return PyLong_FromLong(-1011);
-    }    
-
+    }
+    if (asgi_app_check(app) == true) {
+        LOGn("%s: Detect ASGI app", __func__);
+        g_srv.asgi_app = app;
+    } else {
+        LOGn("%s: Detect WSGI app", __func__);
+        g_srv.wsgi_app = app;
+    }
     const char * host = get_obj_attr_str(server, "host");
     if (!host || strlen(host) >= sizeof(g_srv.host) - 1) {
         PyErr_Format(PyExc_ValueError, "Option host not defined");
@@ -784,6 +856,7 @@ PyObject * init_server(PyObject * Py_UNUSED(self), PyObject * server)
 
     int hr = init_srv();
     if (hr) {
+        LOGc("%s: critical error = %d", hr);
         PyErr_Format(PyExc_Exception, "Cannot init TCP server. Error = %d", hr);
     }
     return PyLong_FromLong(hr);
@@ -821,9 +894,18 @@ PyObject * run_server(PyObject * self, PyObject * server)
     if (!g_srv_inited) {
         PyErr_Format(PyExc_Exception, "server not inited");
         return PyLong_FromLong(-1);
+    }    
+    if (g_srv.asgi_app) {
+        asyncio_t * aio = &g_srv.aio;
+        PyObject * res;
+        res = PyObject_CallFunctionObjArgs(aio->loop.call_soon, aio->uni_loop, NULL);
+        Py_XDECREF(res);
+        res = PyObject_CallFunctionObjArgs(aio->loop.run_forever, NULL);
+        Py_XDECREF(res);
     }
-    uv_run(g_srv.loop, UV_RUN_DEFAULT);
-    
+    else {
+        uv_run(g_srv.loop, UV_RUN_DEFAULT);
+    }
     const char * reason = (g_srv.exit_code == 1) ? "(SIGINT)" : "";
     LOGn("%s: FIN %s", __func__, reason);
     PyObject * rc = close_server(self, server);

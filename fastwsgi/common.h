@@ -23,6 +23,9 @@
 #define _max(a,b) (((a) > (b)) ? (a) : (b))
 #define _min(a,b) (((a) < (b)) ? (a) : (b))
 
+#define FIN_IF(_cond_,_code_) do { if ((_cond_)) { hr = _code_; goto fin; } } while(0)
+#define FIN(_code_)           do { hr = _code_; goto fin; } while(0)
+
 typedef union {
     struct sockaddr_storage storage;
     struct sockaddr addr; 
@@ -35,6 +38,7 @@ typedef union {
 #ifndef FASTWSGI_DEBUG
 #define FASTWSGI_DEBUG
 #endif
+
 #include "logx.h"
 
 
@@ -57,6 +61,9 @@ const char * get_obj_attr_str(PyObject * obj, const char * name);
 
 int get_asctime(char ** asc_time);
 
+PyObject * get_function(PyObject * object);
+
+
 INLINE
 bool is_stream_notconn(uv_stream_t * handle)
 {
@@ -66,6 +73,16 @@ bool is_stream_notconn(uv_stream_t * handle)
         return true;
     }
     return false;
+}
+
+INLINE
+int pydict_moveitem(PyObject * dict, PyObject * key, PyObject * value)
+{
+    int ret = PyDict_SetItem(dict, key, value);
+    if (ret == 0) {
+        Py_DECREF(value);
+    }
+    return ret;
 }
 
 #endif

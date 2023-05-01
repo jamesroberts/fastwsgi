@@ -2,6 +2,7 @@
 #define FASTWSGI_REQUEST_H_
 
 #include "common.h"
+#include "llhttp.h"
 #include "start_response.h"
 
 

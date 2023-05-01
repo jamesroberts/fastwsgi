@@ -94,3 +94,32 @@ int get_asctime(char ** asc_time)
     *asc_time = "";
     return 0;
 }
+
+PyObject * get_function(PyObject * object)
+{
+    if (PyFunction_Check(object)) {
+        Py_INCREF(object);
+        return object;
+    }
+    if (PyMethod_Check(object)) {
+        PyObject * met = PyMethod_GET_FUNCTION(object);
+        Py_INCREF(met);
+        return met;
+    }
+    PyObject * call = PyObject_GetAttrString(object, "__call__");
+    if (call) {
+        if (PyFunction_Check(call))
+            return call;
+
+        if (PyMethod_Check(call)) {
+            PyObject * met = PyMethod_GET_FUNCTION(call);
+            if (PyFunction_Check(met)) {
+                Py_INCREF(met);
+                Py_DECREF(call);
+                return met;
+            }
+        }
+        Py_DECREF(call);
+    }
+    return NULL;
+}

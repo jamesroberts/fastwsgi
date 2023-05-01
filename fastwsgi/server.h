@@ -5,6 +5,7 @@
 #include "llhttp.h"
 #include "request.h"
 #include "xbuf.h"
+#include "asgi.h"
 
 #define max_preloaded_body_chunks 48
 
@@ -31,11 +32,14 @@ typedef struct {
     uv_tcp_t server;  // Placement strictly at the beginning of the structure!
     PyObject * pysrv; // object fastwsgi.py@_Server
     uv_loop_t* loop;
+    int num_loop_cb;   // the number of callbacks that were called in one loop cycle
+    int num_writes;    // the number of write operations
     uv_idle_t worker;  // worker for HTTP pipelining
     int num_pipeline;  // number of active pipelines
     uv_os_fd_t file_descriptor;
     llhttp_settings_t parser_settings;
     PyObject* wsgi_app;
+    PyObject* asgi_app;
     int ipv6;
     char host[64];
     int port;
@@ -55,6 +59,7 @@ typedef struct {
         int base_handles;  // number of base handles (listen socket + signal)
     } nowait;
     int exit_code;
+    asyncio_t aio;
 } server_t;
 
 typedef enum {
@@ -83,6 +88,7 @@ typedef struct {
         char * buf_pos;      // parser cursor position (into master buf)
         char * buf_end;
     } pipeline;
+    asgi_t * asgi;       // ASGI 3.0 implementation
     struct {
         int load_state;
         int64_t http_content_length; // -1 = "Content-Length" not specified
@@ -127,11 +133,18 @@ PyObject * run_server(PyObject * self, PyObject * server);
 PyObject * run_nowait(PyObject * self, PyObject * server);
 PyObject * close_server(PyObject * self, PyObject * server);
 
+int x_send_status(client_t * client, int status);
+int stream_write(client_t * client);
+int stream_read_start(client_t * client);
+int stream_read_stop(client_t * client);
+void close_connection(client_t * client);
+
+// ----------- functions from request.c ----------------------------
+
+void reset_head_buffer(client_t * client);
 void free_start_response(client_t * client);
 void reset_response_preload(client_t * client);
 void reset_response_body(client_t * client);
-
-int x_send_status(client_t * client, int status);
 
 int call_wsgi_app(client_t * client);
 int process_wsgi_response(client_t * client);
@@ -140,11 +153,20 @@ int create_response(client_t * client);
 typedef enum {
     RF_EMPTY           = 0x00,
     RF_SET_KEEP_ALIVE  = 0x01,
-    RF_HEADERS_PYLIST  = 0x02
+    RF_HEADERS_WSGI    = 0x02,
+    RF_HEADERS_ASGI    = 0x04,
+    RF__MAX
 } response_flag_t;
 
 int build_response(client_t * client, int flags, int status, const void * headers, const void * body, int body_size);
 PyObject* wsgi_iterator_get_next_chunk(client_t * client, int outpyerr);
+
+// -----------------------------------------------------------------
+
+inline void before_loop_callback(void * _client)
+{
+    g_srv.num_loop_cb++;
+}
 
 inline void update_log_prefix(void * _client)
 {
