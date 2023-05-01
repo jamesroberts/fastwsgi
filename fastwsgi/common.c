@@ -65,7 +65,7 @@ const char * get_obj_attr_str(PyObject * obj, const char * name)
     return PyUnicode_AsUTF8(attr);
 }
 
-static const char weekDays[7][4] = { "Sun", "Mon", "Tue", "Wen", "Thu", "Fri", "Sat" };
+static const char weekDays[7][4] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
 static const char monthList[12][4] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
 time_t g_actual_time = 0;
@@ -79,11 +79,16 @@ int get_asctime(char ** asc_time)
         *asc_time = g_actual_asctime;
         return g_actual_asctime_len;
     }
-    struct tm * tv = gmtime(&curr_time);
+    struct tm tv;
+#ifdef _WIN32
+    gmtime_s(&tv, &curr_time);
+#else
+    gmtime_r(&curr_time, &tv);
+#endif
     char buf[64];
-    int len = sprintf(buf, "%s, %d %s %04d %02d:%02d:%02d GMT",
-        weekDays[tv->tm_wday], tv->tm_mday, monthList[tv->tm_mon],
-        1900 + tv->tm_year, tv->tm_hour, tv->tm_min, tv->tm_sec);
+    int len = sprintf(buf, "%s, %02d %s %04d %02d:%02d:%02d GMT",
+        weekDays[tv.tm_wday], tv.tm_mday, monthList[tv.tm_mon],
+        1900 + tv.tm_year, tv.tm_hour, tv.tm_min, tv.tm_sec);
     if (len > 0 && len < 32) {
         g_actual_time = curr_time;
         g_actual_asctime_len = len;
