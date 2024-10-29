@@ -105,6 +105,33 @@ Pull requests are welcome. For major changes, please open an issue first to disc
 Please make sure to update tests where appropriate.
 
 
+## Building
+
+To build the `.whl` file you must have all dependencies installed and available at your [PATH](https://en.wikipedia.org/wiki/PATH_(variable)) variable.
+
+Besides `Python >=3.6`, these are the dependencies for each platform:
+- Windows
+    - [Visual Studio](https://visualstudio.microsoft.com/vs/community/) with profile `Desktop development with C++`
+- Linux
+    - `gcc`
+- macOS
+    - `clang` (already comes with OS)
+
+With everything alright, you must clone the project and its submodules:
+
+```bash
+git clone --recurse-submodules https://github.com/jamesroberts/fastwsgi.git
+```
+
+Then go to the repo and build it:
+
+```bash
+python setup.py bdist_wheel
+```
+
+If everything goes fine you will be able to find your `.whl` in the `dist/` directory.
+
+
 ## Significant Contributions
 
 Special thank you to the following individuals who have made significant contributions to FastWSGI:
