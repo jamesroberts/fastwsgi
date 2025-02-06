@@ -14,7 +14,7 @@ bytesio_t * get_bytesio_object(PyObject * io_BytesIO)
 {
     if (PY_MAJOR_VERSION != 3)
         return NULL;
-    if (PY_MINOR_VERSION >= 8 && PY_MINOR_VERSION <= 11)
+    if (PY_MINOR_VERSION >= 8 && PY_MINOR_VERSION <= 14)
         return (bytesio_t *)io_BytesIO;
     return NULL;
 }
